@@ -37,6 +37,11 @@ If you are on sway, you can get your display outputs with:
 ```
 swaymsg -t get_outputs
 ```
+## Notes
+If you are on sway, make sure you don't let swaybg stand in your way:
+```
+killall swaybg
+```
 ## Acknowledgments
 - glpaper for the boilderplate code, check em out here:
   - https://hg.sr.ht/~scoopta/glpaper
