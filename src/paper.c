@@ -169,8 +169,8 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     EGLDisplay egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wl, NULL);
     eglInitialize(egl_display, NULL, NULL);
     const EGLint win_attrib[] = {
-        // EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        // EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
         EGL_BLUE_SIZE, 8,
@@ -181,8 +181,8 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     EGLint config_len;
     eglChooseConfig(egl_display, win_attrib, &config, 1, &config_len);
     const EGLint ctx_attrib[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 2,
-        EGL_CONTEXT_MINOR_VERSION, 0,
+        EGL_CONTEXT_MAJOR_VERSION, 4,
+        EGL_CONTEXT_MINOR_VERSION, 6,
         EGL_NONE
     };
     EGLContext ctx = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, ctx_attrib);
@@ -209,7 +209,7 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
          printf("mpv init failed");
     }
 
-    // Have mpv render onto egl window
+    // Have mpv render onto egl context
     mpv_render_param params[] = {
         {MPV_RENDER_PARAM_API_TYPE, MPV_RENDER_API_TYPE_OPENGL},
         {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &(mpv_opengl_init_params){
@@ -234,6 +234,7 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
         // Flip rendering (needed due to flipped GL coordinate system).
         {MPV_RENDER_PARAM_FLIP_Y, &(int){1}},
     };
+
     // Main loop
     while (1) {
         mpv_render_context_render(mpv_gl, render_params);
