@@ -4,6 +4,7 @@
 ###### Or a fork of glpaper that plays videos using mpv, instead of rendering shaders.
 ## Dependencies
 - mpv
+- wlroots
 
 ## Building 
 ### Building Requirements:
@@ -13,7 +14,7 @@
 - pkg-config
 
 ```
-git clone https://github.com/GhostNaN/mpvpaper
+git clone --single-branch https://github.com/GhostNaN/mpvpaper
 cd mpvpaper
 meson build
 cd build
@@ -30,7 +31,7 @@ mpvpaper DP-2 /path/to/video
 ```
 You can also pass mpv options by passing "--mpv-options" or "-o" like so:
 ```
-mpvpaper -o "no-audio --loop shuffle" HDMI-A-1 www.url/to/video
+mpvpaper -o "no-audio --loop-playlist shuffle" HDMI-A-1 www.url/to/playlist
 ```
 If you are on sway, you can get your display outputs with:
 ```
