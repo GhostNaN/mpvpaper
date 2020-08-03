@@ -237,10 +237,15 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
 
     // Main loop
     while (1) {
+        // Closes when the compositor goes away
+        if(wl_display_flush(wl) == -1) {
+            break;
+        }
+        // Render next frame
         mpv_render_context_render(mpv_gl, render_params);
         eglSwapBuffers(egl_display, egl_surface);
 
-        mpv_event *event = mpv_wait_event(mpv, 0.001);
+        mpv_event *event = mpv_wait_event(mpv, 0);
         if (event->event_id == MPV_EVENT_SHUTDOWN || event->event_id == MPV_EVENT_IDLE)
             break;
     }
