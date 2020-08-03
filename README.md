@@ -21,6 +21,10 @@ cd build
 ninja
 ```
 ## Installing 
+### Arch Based:
+AUR package: https://aur.archlinux.org/packages/mpvpaper-git/
+
+### If building:
 ```
 sudo cp mpvpaper /usr/bin
 ```
@@ -33,12 +37,12 @@ You can also pass mpv options by passing "--mpv-options" or "-o" like so:
 ```
 mpvpaper -o "no-audio --loop-playlist shuffle" HDMI-A-1 www.url/to/playlist
 ```
+## Notes
 If you are on sway, you can get your display outputs with:
 ```
 swaymsg -t get_outputs
 ```
-## Notes
-If you are on sway, make sure you don't let swaybg stand in your way:
+And make sure you don't let swaybg stand in your way:
 ```
 killall swaybg
 ```
