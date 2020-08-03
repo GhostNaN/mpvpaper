@@ -16,9 +16,8 @@
 ```
 git clone --single-branch https://github.com/GhostNaN/mpvpaper
 cd mpvpaper
-meson build
-cd build
-ninja
+meson build --prefix=/usr
+ninja -C build
 ```
 ## Installing 
 ### Arch Based:
@@ -26,9 +25,10 @@ AUR package: https://aur.archlinux.org/packages/mpvpaper-git/
 
 ### If building:
 ```
-sudo cp mpvpaper /usr/bin
+ninja -C build install
 ```
 ## Usage
+### Running
 Simple example:
 ```
 mpvpaper DP-2 /path/to/video
@@ -37,6 +37,16 @@ You can also pass mpv options by passing "--mpv-options" or "-o" like so:
 ```
 mpvpaper -o "no-audio --loop-playlist shuffle" HDMI-A-1 www.url/to/playlist
 ```
+### Controlling
+If you would like to control MPVPaper while it's running, use a mpv input-ipc-server like this:
+```
+mpvpaper -o "input-ipc-server=/tmp/mpv-socket" DP-1 /path/to/video
+```
+Then input commands with socat. For example, toggle pause:
+```
+echo 'cycle pause' | socat - /tmp/mpv-socket
+```
+For more commands read: https://mpv.io/manual/master/#command-interface
 ## Notes
 If you are on sway, you can get your display outputs with:
 ```
