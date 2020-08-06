@@ -180,15 +180,33 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     EGLConfig config;
     EGLint config_len;
     eglChooseConfig(egl_display, win_attrib, &config, 1, &config_len);
-    const EGLint ctx_attrib[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 3,
-        EGL_CONTEXT_MINOR_VERSION, 0,
-        EGL_NONE
+
+    // Check for OpenGL combatiblity for creating egl context
+    static const struct { int major, minor; } gl_versions[] = {
+        {4, 6}, {4, 5}, {4, 4}, {4, 3}, {4, 2}, {4, 1}, {4, 0},
+        {3, 3}, {3, 2}, {3, 1}, {3, 0},
+        {0, 0}
     };
-    EGLContext ctx = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, ctx_attrib);
+    EGLContext egl_ctx = NULL;
+    for (int i = 0; gl_versions[i].major > 0; i++) {
+        const EGLint ctx_attrib[] = {
+            EGL_CONTEXT_MAJOR_VERSION, gl_versions[i].major,
+            EGL_CONTEXT_MINOR_VERSION, gl_versions[i].major,
+            EGL_NONE
+        };
+        egl_ctx = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, ctx_attrib);
+        if (egl_ctx) {
+            printf("OpenGL %i.%i context loaded\n", gl_versions[i].major, gl_versions[i].minor);
+            break;
+        }
+    }
+    if (!egl_ctx) {
+        printf("Failed to create EGL context\n");
+        return 1;
+    }
 
     EGLSurface egl_surface = eglCreatePlatformWindowSurface(egl_display, config, window, NULL);
-    eglMakeCurrent(egl_display, egl_surface, egl_surface, ctx);
+    eglMakeCurrent(egl_display, egl_surface, egl_surface, egl_ctx);
 
     gladLoadGL();
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -197,7 +215,7 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     // Start mpv
     mpv_handle* mpv = mpv_create();
     if (!mpv) {
-        printf("failed creating context\n");
+        printf("Failed creating mpv context\n");
         return 1;
     }
 
@@ -219,7 +237,7 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     };
     mpv_render_context *mpv_gl;
     if (mpv_render_context_create(&mpv_gl, mpv, params) < 0)
-        printf("failed to initialize mpv GL context");
+        printf("Failed to initialize mpv GL context");
 
     // Play this file.
     const char* cmd[] = {"loadfile", video_path, NULL};
