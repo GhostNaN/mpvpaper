@@ -88,7 +88,7 @@ static void *get_proc_address_mpv(void *ctx, const char *name){
     return eglGetProcAddress(name);
 }
 
-int paper_init(char* _monitor, char* video_path, char* layer_name) {
+int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) {
 	monitor = _monitor;
     wl_list_init(&outputs);
     struct wl_display* wl = wl_display_connect(NULL);
@@ -129,6 +129,9 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
         fprintf(stderr, ":/ sorry about this but we can't seem to find that output\n");
         return 1;
     }
+    else if (verbose) {
+        printf("Connected to output %s\n", monitor);
+    }
 
 
     struct wl_surface* wl_surface = wl_compositor_create_surface(comp);
@@ -154,6 +157,15 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     } else {
         layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
     }
+    if (verbose) {
+        if (layer_name == NULL) {
+            printf("Shell layer background set\n");
+        }
+        else {
+            printf("Shell layer %s set\n", layer_name);
+        }
+    }
+
     struct zwlr_layer_surface_v1* surface = zwlr_layer_shell_v1_get_layer_surface(shell, wl_surface, output->output, layer, "mpvpaper");
     struct zwlr_layer_surface_v1_listener surface_listener = {
         .closed = nop,
@@ -196,7 +208,9 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
         };
         egl_ctx = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, ctx_attrib);
         if (egl_ctx) {
-            printf("OpenGL %i.%i context loaded\n", gl_versions[i].major, gl_versions[i].minor);
+            if (verbose) {
+                printf("OpenGL %i.%i EGL context loaded\n", gl_versions[i].major, gl_versions[i].minor);
+            }
             break;
         }
     }
@@ -242,6 +256,9 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     // Play this file.
     const char* cmd[] = {"loadfile", video_path, NULL};
     mpv_command_async(mpv, 0, cmd);
+    if (verbose) {
+        printf("Loading %s\n", video_path);
+    }
 
     mpv_render_param render_params[] = {
         {MPV_RENDER_PARAM_OPENGL_FBO, &(mpv_opengl_fbo){
@@ -268,6 +285,9 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
             break;
     }
 
+    if (verbose) {
+        printf("Exiting\n");
+    }
     mpv_render_context_free(mpv_gl);
     mpv_detach_destroy(mpv);
 

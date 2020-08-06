@@ -35,6 +35,7 @@ static void print_usage(char** argv) {
     printf("%s [options] <output> <url|path filename>\n", argv[0] + offset);
     printf("Options:\n");
     printf("--help\t\t-h\tDisplays this help message\n");
+    printf("--verbose\t-v\tBe more verbose\n");
     printf("--fork\t\t-f\tForks mpvpaper so you can close the terminal\n");
     printf("--layer\t\t-l\tSpecifies shell layer to run on (background by default)\n");
     printf("--mpv-options\t-o\tForwards mpv options (Must be within quotes\"\")\n");
@@ -49,6 +50,12 @@ int main(int argc, char** argv) {
                 .has_arg = no_argument,
                 .flag = NULL,
                 .val = 'h'
+            },
+            {
+                .name = "verbose",
+                .has_arg = no_argument,
+                .flag = NULL,
+                .val = 'v'
             },
             {
                 .name = "fork",
@@ -75,13 +82,17 @@ int main(int argc, char** argv) {
                 .val = 0
             }
         };
+        int verbose = 0;
         char* layer = NULL;
         char* mpv_options = NULL;
         char opt;
-        while((opt = getopt_long(argc, argv, "hfl:o:", opts, NULL)) != -1) {
+        while((opt = getopt_long(argc, argv, "hvfl:o:", opts, NULL)) != -1) {
             switch(opt) {
             case 'h':
                 print_usage(argv);
+                break;
+            case 'v':
+                verbose = 1;
                 break;
             case 'f':
                 if(fork() > 0) {
@@ -110,7 +121,7 @@ int main(int argc, char** argv) {
             print_usage(argv);
         }
 
-        paper_init(argv[optind], argv[optind + 1], layer);
+        paper_init(argv[optind], argv[optind + 1], verbose, layer);
     } else {
         print_usage(argv);
     }

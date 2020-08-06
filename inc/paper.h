@@ -3,6 +3,6 @@
 
 #include <stdint.h>
 
-void paper_init(char* monitor, char* video, char* layer_name);
+void paper_init(char* monitor, char* video, int verbose, char* layer_name);
 
 #endif
