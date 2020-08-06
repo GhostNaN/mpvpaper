@@ -154,7 +154,7 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     } else {
         layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
     }
-    struct zwlr_layer_surface_v1* surface = zwlr_layer_shell_v1_get_layer_surface(shell, wl_surface, output->output, layer, "glpaper");
+    struct zwlr_layer_surface_v1* surface = zwlr_layer_shell_v1_get_layer_surface(shell, wl_surface, output->output, layer, "mpvpaper");
     struct zwlr_layer_surface_v1_listener surface_listener = {
         .closed = nop,
         .configure = config_surface
@@ -181,8 +181,8 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     EGLint config_len;
     eglChooseConfig(egl_display, win_attrib, &config, 1, &config_len);
     const EGLint ctx_attrib[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 4,
-        EGL_CONTEXT_MINOR_VERSION, 6,
+        EGL_CONTEXT_MAJOR_VERSION, 3,
+        EGL_CONTEXT_MINOR_VERSION, 0,
         EGL_NONE
     };
     EGLContext ctx = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, ctx_attrib);
@@ -195,7 +195,7 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
     glViewport(0, 0, output->width, output->height);
 
     // Start mpv
-    mpv_handle *mpv = mpv_create();
+    mpv_handle* mpv = mpv_create();
     if (!mpv) {
         printf("failed creating context\n");
         return 1;
@@ -222,7 +222,7 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
         printf("failed to initialize mpv GL context");
 
     // Play this file.
-    const char *cmd[] = {"loadfile", video_path, NULL};
+    const char* cmd[] = {"loadfile", video_path, NULL};
     mpv_command_async(mpv, 0, cmd);
 
     mpv_render_param render_params[] = {
@@ -245,7 +245,7 @@ int paper_init(char* _monitor, char* video_path, char* layer_name) {
         mpv_render_context_render(mpv_gl, render_params);
         eglSwapBuffers(egl_display, egl_surface);
 
-        mpv_event *event = mpv_wait_event(mpv, 0);
+        mpv_event* event = mpv_wait_event(mpv, 0);
         if (event->event_id == MPV_EVENT_SHUTDOWN || event->event_id == MPV_EVENT_IDLE)
             break;
     }
