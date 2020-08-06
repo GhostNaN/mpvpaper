@@ -18,10 +18,6 @@ Clone:
 ```
 git clone --single-branch https://github.com/GhostNaN/mpvpaper
 ```
-Or if you have an older GPU and it doesn't start, use the OpenGL 3.0 version instead:
-```
-git clone --single-branch --branch opengl-3.0 https://github.com/GhostNaN/mpvpaper
-```
 Build:
 ```
 cd mpvpaper
