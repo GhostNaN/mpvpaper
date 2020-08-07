@@ -121,6 +121,10 @@ int main(int argc, char** argv) {
             print_usage(argv);
         }
 
+        if(0 == system("pidof swaybg > /dev/null")) {
+            printf("Warning: swaybg is running. This may block mpvpaper from being seen. \n");
+        }
+
         paper_init(argv[optind], argv[optind + 1], verbose, layer);
     } else {
         print_usage(argv);
