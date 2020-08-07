@@ -243,6 +243,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
 
     // Have mpv render onto egl context
     mpv_render_param params[] = {
+        {MPV_RENDER_PARAM_WL_DISPLAY, wl},
         {MPV_RENDER_PARAM_API_TYPE, MPV_RENDER_API_TYPE_OPENGL},
         {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &(mpv_opengl_init_params){
             .get_proc_address = get_proc_address_mpv,
@@ -256,8 +257,12 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     // Play this file.
     const char* cmd[] = {"loadfile", video_path, NULL};
     mpv_command_async(mpv, 0, cmd);
+    mpv_event* event = mpv_wait_event(mpv, 0);
+    while (event->event_id != MPV_EVENT_START_FILE){
+        event = mpv_wait_event(mpv, 0);
+    }
     if (verbose) {
-        printf("Loading %s\n", video_path);
+        printf("Loaded %s\n", video_path);
     }
 
     mpv_render_param render_params[] = {
