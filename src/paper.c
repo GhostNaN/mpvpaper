@@ -222,7 +222,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     EGLSurface egl_surface = eglCreatePlatformWindowSurface(egl_display, config, window, NULL);
     eglMakeCurrent(egl_display, egl_surface, egl_surface, egl_ctx);
 
-    gladLoadGL();
+    gladLoadGLLoader((GLADloadproc) eglGetProcAddress);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glViewport(0, 0, output->width, output->height);
 
@@ -257,9 +257,9 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     // Play this file.
     const char* cmd[] = {"loadfile", video_path, NULL};
     mpv_command_async(mpv, 0, cmd);
-    mpv_event* event = mpv_wait_event(mpv, 0);
+    mpv_event* event = mpv_wait_event(mpv, 1);
     while (event->event_id != MPV_EVENT_START_FILE){
-        event = mpv_wait_event(mpv, 0);
+        event = mpv_wait_event(mpv, 1);
     }
     if (verbose) {
         printf("Loaded %s\n", video_path);
