@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <cflogprinter.h>
 #include <mpv/client.h>
 #include <mpv/render_gl.h>
 #include <wayland-egl.h>
@@ -126,11 +127,11 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     wl_display_roundtrip(wl);
 
     if(output == NULL) {
-        fprintf(stderr, ":/ sorry about this but we can't seem to find that output\n");
+        cflp_error(":/ sorry about this but we can't seem to find that output.");
         return 1;
     }
     else if (verbose) {
-        printf("Connected to output %s\n", monitor);
+        cflp_good("Connected to output %s", monitor);
     }
 
 
@@ -159,10 +160,10 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     }
     if (verbose) {
         if (layer_name == NULL) {
-            printf("Shell layer background set\n");
+            cflp_info("Shell layer background set");
         }
         else {
-            printf("Shell layer %s set\n", layer_name);
+            cflp_info("Shell layer %s set", layer_name);
         }
     }
 
@@ -209,13 +210,13 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
         egl_ctx = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, ctx_attrib);
         if (egl_ctx) {
             if (verbose) {
-                printf("OpenGL %i.%i EGL context loaded\n", gl_versions[i].major, gl_versions[i].minor);
+                cflp_info("OpenGL %i.%i EGL context loaded", gl_versions[i].major, gl_versions[i].minor);
             }
             break;
         }
     }
     if (!egl_ctx) {
-        printf("Failed to create EGL context\n");
+        cflp_bad("Failed to create EGL context");
         return 1;
     }
 
@@ -229,7 +230,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     // Start mpv
     mpv_handle* mpv = mpv_create();
     if (!mpv) {
-        printf("Failed creating mpv context\n");
+        cflp_bad("Failed creating mpv context");
         return 1;
     }
 
@@ -238,7 +239,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     remove("/tmp/mpvpaper.conf");
 
     if (mpv_initialize(mpv) < 0) {
-         printf("mpv init failed");
+        cflp_error("mpv init failed");
     }
 
     // Have mpv render onto egl context
@@ -252,7 +253,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     };
     mpv_render_context *mpv_gl;
     if (mpv_render_context_create(&mpv_gl, mpv, params) < 0)
-        printf("Failed to initialize mpv GL context");
+        cflp_error("Failed to initialize mpv GL context");
 
     // Play this file.
     const char* cmd[] = {"loadfile", video_path, NULL};
@@ -262,7 +263,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
         event = mpv_wait_event(mpv, 1);
     }
     if (verbose) {
-        printf("Loaded %s\n", video_path);
+        cflp_info("Loaded %s", video_path);
     }
 
     mpv_render_param render_params[] = {
@@ -291,7 +292,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     }
 
     if (verbose) {
-        printf("Exiting\n");
+        cflp_info("Exiting mpvpaper");
     }
     mpv_render_context_free(mpv_gl);
     mpv_detach_destroy(mpv);

@@ -23,6 +23,7 @@
 #include <stdlib.h>
 
 #include <paper.h>
+#include <cflogprinter.h>
 
 static void print_usage(char** argv) {
     char* slash = strrchr(argv[0], '/');
@@ -122,7 +123,7 @@ int main(int argc, char** argv) {
         }
 
         if(0 == system("pidof swaybg > /dev/null")) {
-            printf("Warning: swaybg is running. This may block mpvpaper from being seen. \n");
+            cflp_warning("Warning: swaybg is running. This may block mpvpaper from being seen.");
         }
 
         paper_init(argv[optind], argv[optind + 1], verbose, layer);
