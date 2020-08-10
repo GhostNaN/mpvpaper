@@ -19,7 +19,7 @@ void cflp_error(char *msg, ...) {
     va_list arg;
 
     va_start (arg, msg);
-    vfprintf (stderr, msg, arg); //print to stderr instead of stdout!
+    vfprintf (stdout, msg, arg);
     va_end (arg);
 
     printf("%s\n", RESET);
