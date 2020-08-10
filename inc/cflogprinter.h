@@ -12,8 +12,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-void cflp_good(char *msg, ...);
-void cflp_bad(char *msg, ...);
+void cflp_success(char *msg, ...);
 void cflp_error(char *msg, ...);
 void cflp_warning(char *msg, ...);
 void cflp_info(char *msg, ...);

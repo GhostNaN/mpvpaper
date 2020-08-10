@@ -131,7 +131,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
         return 1;
     }
     else if (verbose) {
-        cflp_good("Connected to output %s", monitor);
+        cflp_success("Connected to output %s", monitor);
     }
 
 
@@ -216,7 +216,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
         }
     }
     if (!egl_ctx) {
-        cflp_bad("Failed to create EGL context");
+        cflp_error("Failed to create EGL context");
         return 1;
     }
 
@@ -230,7 +230,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     // Start mpv
     mpv_handle* mpv = mpv_create();
     if (!mpv) {
-        cflp_bad("Failed creating mpv context");
+        cflp_error("Failed creating mpv context");
         return 1;
     }
 

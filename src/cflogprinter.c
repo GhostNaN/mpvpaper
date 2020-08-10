@@ -1,20 +1,7 @@
 #include <cflogprinter.h>
 
-void cflp_good(char *msg, ...) {
+void cflp_success(char *msg, ...) {
     printf("%s[+] ", GREEN);
-
-    va_list arg;
-
-    va_start (arg, msg);
-    vfprintf (stdout, msg, arg);
-    va_end (arg);
-
-    printf("%s\n", RESET);
-
-}
-
-void cflp_bad(char *msg, ...) {
-    printf("%s[-] ", RED);
 
     va_list arg;
 
@@ -40,7 +27,7 @@ void cflp_error(char *msg, ...) {
 }
 
 void cflp_warning(char *msg, ...) {
-    printf("%s[!] ", RED);
+    printf("%s[!] ", YELLOW);
 
     va_list arg;
 

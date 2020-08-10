@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
         }
 
         if(0 == system("pidof swaybg > /dev/null")) {
-            cflp_warning("Warning: swaybg is running. This may block mpvpaper from being seen.");
+            cflp_warning("swaybg is running. This may block mpvpaper from being seen.");
         }
 
         paper_init(argv[optind], argv[optind + 1], verbose, layer);
