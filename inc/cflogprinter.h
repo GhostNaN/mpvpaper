@@ -14,7 +14,7 @@
 
 void cflp_good(char *msg, ...);
 void cflp_bad(char *msg, ...);
-void cflp_bad_error(char *msg, ...);
+void cflp_error(char *msg, ...);
 void cflp_warning(char *msg, ...);
 void cflp_info(char *msg, ...);
 void cflp_custom(char *color, char *msg, ...);

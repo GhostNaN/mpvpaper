@@ -127,7 +127,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     wl_display_roundtrip(wl);
 
     if(output == NULL) {
-        cflp_bad_error(":/ sorry about this but we can't seem to find that output.");
+        cflp_error(":/ sorry about this but we can't seem to find that output.");
         return 1;
     }
     else if (verbose) {
@@ -163,7 +163,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
             cflp_info("Shell layer background set");
         }
         else {
-            cflp_info("Shell layer %s background set", layer_name);
+            cflp_info("Shell layer %s set", layer_name);
         }
     }
 
@@ -239,7 +239,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     remove("/tmp/mpvpaper.conf");
 
     if (mpv_initialize(mpv) < 0) {
-        cflp_bad_error("mpv init failed");
+        cflp_error("mpv init failed");
     }
 
     // Have mpv render onto egl context
@@ -253,7 +253,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
     };
     mpv_render_context *mpv_gl;
     if (mpv_render_context_create(&mpv_gl, mpv, params) < 0)
-        cflp_bad_error("Failed to initialize mpv GL context");
+        cflp_error("Failed to initialize mpv GL context");
 
     // Play this file.
     const char* cmd[] = {"loadfile", video_path, NULL};
@@ -263,7 +263,7 @@ int paper_init(char* _monitor, char* video_path, int verbose, char* layer_name) 
         event = mpv_wait_event(mpv, 1);
     }
     if (verbose) {
-        cflp_good("Loaded %s", video_path);
+        cflp_info("Loaded %s", video_path);
     }
 
     mpv_render_param render_params[] = {

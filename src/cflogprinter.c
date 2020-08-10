@@ -26,7 +26,7 @@ void cflp_bad(char *msg, ...) {
 
 }
 
-void cflp_bad_error(char *msg, ...) {
+void cflp_error(char *msg, ...) {
     printf("%s[-] ", RED);
 
     va_list arg;
