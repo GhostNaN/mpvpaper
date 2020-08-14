@@ -1,110 +1,506 @@
-/*
- *  Copyright (C) 2019-2020 Scoopta
- *  This file is part of GLPaper
- *  GLPaper is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    GLPaper is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with GLPaper.  If not, see <http://www.gnu.org/licenses/>.
- */
-
 #include <stdio.h>
-#include <unistd.h>
-#include <stdint.h>
-#include <getopt.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+#include <getopt.h>
+#include <unistd.h>
+#include <pthread.h>
 
-#include <paper.h>
+#include <wayland-client.h>
+#include <wayland-egl.h>
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "xdg-output-unstable-v1-client-protocol.h"
+
+#include <glad/glad.h>
+#include <glad/glad_egl.h>
+
+#include <mpv/client.h>
+#include <mpv/render_gl.h>
+
 #include <cflogprinter.h>
 
-static void print_usage(char** argv) {
-    char* slash = strrchr(argv[0], '/');
-    uint64_t offset;
-    if(slash == NULL) {
-        offset = 0;
-    } else {
-        offset = (slash - argv[0]) + 1;
+
+struct wl_state {
+	struct wl_display *display;
+	struct wl_compositor *compositor;
+	struct zwlr_layer_shell_v1 *layer_shell;
+	struct zxdg_output_manager_v1 *xdg_output_manager;
+    struct wl_list configs;  // struct output_config::link
+    struct wl_list outputs;  // struct display_output::link
+    int run_display;
+};
+
+struct output_config {
+	char *output;
+    char* video_path;
+    int layer;
+	struct wl_list link;
+};
+
+struct display_output {
+	uint32_t wl_name;
+	struct wl_output *wl_output;
+	struct zxdg_output_v1 *xdg_output;
+	char *name;
+	char *identifier;
+
+    struct wl_state *state;
+    struct output_config *config;
+
+	struct wl_surface *surface;
+    struct zwlr_layer_surface_v1 *layer_surface;
+
+    struct wl_egl_window* egl_window;
+    EGLDisplay *egl_display;
+    EGLContext *egl_context;
+    EGLSurface *egl_surface;
+
+    mpv_handle* mpv;
+    mpv_render_context *mpv_context;
+
+	uint32_t width, height;
+
+    struct wl_list link;
+};
+
+int VERBOSE = 0;
+
+static void nop() {}
+
+const static struct wl_callback_listener wl_surface_frame_listener;
+
+static void render(struct display_output *output) {
+
+    mpv_event* event = mpv_wait_event(output->mpv, 0);
+    if (event->event_id == MPV_EVENT_SHUTDOWN || event->event_id == MPV_EVENT_IDLE) {
+        remove("/tmp/mpvpaper.conf");
+        exit(EXIT_SUCCESS);
     }
-    printf("%s [options] <output> <url|path filename>\n", argv[0] + offset);
-    printf("Options:\n");
-    printf("--help\t\t-h\tDisplays this help message\n");
-    printf("--verbose\t-v\tBe more verbose\n");
-    printf("--fork\t\t-f\tForks mpvpaper so you can close the terminal\n");
-    printf("--layer\t\t-l\tSpecifies shell layer to run on (background by default)\n");
-    printf("--mpv-options\t-o\tForwards mpv options (Must be within quotes\"\")\n");
-    exit(0);
+
+    mpv_render_param render_params[] = {
+        {MPV_RENDER_PARAM_OPENGL_FBO, &(mpv_opengl_fbo){
+            .fbo = 0,
+            .w = output->width,
+            .h = output->height,
+        }},
+        // Flip rendering (needed due to flipped GL coordinate system).
+        {MPV_RENDER_PARAM_FLIP_Y, &(int){1}},
+    };
+
+    mpv_render_context_render(output->mpv_context, render_params);
+
+    // Callback new frame
+    struct wl_callback *callback = wl_surface_frame(output->surface);
+    wl_callback_add_listener(callback, &wl_surface_frame_listener, output);
+
+    if (!eglSwapBuffers(output->egl_display, output->egl_surface))
+        cflp_error("Failed to swap egl buffers 0x%X", eglGetError());
+
 }
 
-int main(int argc, char** argv) {
-    if(argc > 2) {
-        struct option opts[] = {
-            {
-                .name = "help",
-                .has_arg = no_argument,
-                .flag = NULL,
-                .val = 'h'
-            },
-            {
-                .name = "verbose",
-                .has_arg = no_argument,
-                .flag = NULL,
-                .val = 'v'
-            },
-            {
-                .name = "fork",
-                .has_arg = no_argument,
-                .flag = NULL,
-                .val = 'f'
-            },
-            {
-                .name = "layer",
-                .has_arg = required_argument,
-                .flag = NULL,
-                .val = 'l'
-            },
-            {
-                .name = "mpv-options",
-                .has_arg = required_argument,
-                .flag = NULL,
-                .val = 'o'
-            },
-            {
-                .name = NULL,
-                .has_arg = 0,
-                .flag = NULL,
-                .val = 0
-            }
+static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t time) {
+    (void) time;
+    wl_callback_destroy(callback);
+    render(data);
+}
+
+const static struct wl_callback_listener wl_surface_frame_listener = {
+    .done = frame_handle_done,
+};
+
+static void *get_proc_address_mpv(void *ctx, const char *name){
+    (void) ctx;
+    return eglGetProcAddress(name);
+}
+
+static void init_mpv(struct display_output *output) {
+    // Start mpv
+    output->mpv = mpv_create();
+    if (!output->mpv) {
+        cflp_error("Failed creating mpv context");
+        exit(EXIT_FAILURE);
+    }
+
+    // Set mpv_options passed
+    mpv_set_option_string(output->mpv, "include", "/tmp/mpvpaper.conf");
+
+    if (mpv_initialize(output->mpv) < 0) {
+        cflp_error("mpv init failed");
+        exit(EXIT_FAILURE);
+    }
+    // Have mpv render onto egl context
+    mpv_render_param params[] = {
+        {MPV_RENDER_PARAM_WL_DISPLAY, output->state->display},
+        {MPV_RENDER_PARAM_API_TYPE, MPV_RENDER_API_TYPE_OPENGL},
+        {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &(mpv_opengl_init_params){
+            .get_proc_address = get_proc_address_mpv,
+        }},
+        // {MPV_RENDER_PARAM_ADVANCED_CONTROL, &(int){1}}
+    };
+    if (mpv_render_context_create(&output->mpv_context, output->mpv, params) < 0)
+        cflp_error("Failed to initialize mpv GL context");
+
+    // Play this file.
+    const char* cmd[] = {"loadfile", output->config->video_path, NULL};
+    mpv_command_async(output->mpv, 0, cmd);
+    mpv_event* event = mpv_wait_event(output->mpv, 1);
+    while (event->event_id != MPV_EVENT_START_FILE){
+        event = mpv_wait_event(output->mpv, 1);
+    }
+    if (VERBOSE) {
+        cflp_info("Loaded %s", output->config->video_path);
+    }
+}
+
+static void init_egl(struct display_output *output, struct wl_state *state) {
+
+    output->egl_window = wl_egl_window_create(output->surface, output->width, output->height);
+    eglBindAPI(EGL_OPENGL_API);
+    output->egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, state->display, NULL);
+    eglInitialize(output->egl_display, NULL, NULL);
+    const EGLint win_attrib[] = {
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+        EGL_RED_SIZE, 8,
+        EGL_GREEN_SIZE, 8,
+        EGL_BLUE_SIZE, 8,
+        EGL_NONE
+    };
+
+    EGLConfig config;
+    EGLint config_len;
+    eglChooseConfig(output->egl_display, win_attrib, &config, 1, &config_len);
+
+    // Check for OpenGL combatiblity for creating egl context
+    static const struct { int major, minor; } gl_versions[] = {
+        {4, 6}, {4, 5}, {4, 4}, {4, 3}, {4, 2}, {4, 1}, {4, 0},
+        {3, 3}, {3, 2}, {3, 1}, {3, 0},
+        {0, 0}
+    };
+    output->egl_context = NULL;
+    for (int i = 0; gl_versions[i].major > 0; i++) {
+        const EGLint ctx_attrib[] = {
+            EGL_CONTEXT_MAJOR_VERSION, gl_versions[i].major,
+            EGL_CONTEXT_MINOR_VERSION, gl_versions[i].major,
+            EGL_NONE
         };
-        int verbose = 0;
-        char* layer = NULL;
-        char* mpv_options = NULL;
+        output->egl_context = eglCreateContext(output->egl_display, config, EGL_NO_CONTEXT, ctx_attrib);
+        if (output->egl_context) {
+            if (VERBOSE) {
+                cflp_info("OpenGL %i.%i EGL context loaded", gl_versions[i].major, gl_versions[i].minor);
+            }
+            break;
+        }
+    }
+    if (!output->egl_context) {
+        cflp_error("Failed to create EGL context");
+        exit(EXIT_FAILURE);
+    }
+
+    output->egl_surface = eglCreatePlatformWindowSurface(output->egl_display, config, output->egl_window, NULL);
+    eglMakeCurrent(output->egl_display, output->egl_surface, output->egl_surface, output->egl_context);
+
+    gladLoadGLLoader((GLADloadproc) eglGetProcAddress);
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glViewport(0, 0, output->width, output->height);
+
+    eglSwapInterval(output->egl_display, 0);
+}
+
+static void init_render_loop(struct display_output *output ) {
+
+    if (!output->egl_display) {
+        init_egl(output, output->state);
+    }
+    if (!output->mpv) {
+        init_mpv(output);
+    }
+    if (output->egl_display && output->mpv_context) {
+        // Kick start render loop
+        render(output);
+    }
+}
+
+static void destroy_output_config(struct output_config *config) {
+	if (!config) {
+		return;
+	}
+	wl_list_remove(&config->link);
+	free(config->output);
+	free(config);
+}
+
+static void destroy_display_output(struct display_output *output) {
+	if (!output) {
+		return;
+	}
+    wl_list_remove(&output->link);
+    if (output->layer_surface != NULL) {
+        zwlr_layer_surface_v1_destroy(output->layer_surface);
+    }
+    if (output->surface != NULL) {
+        wl_surface_destroy(output->surface);
+    }
+    if (output->egl_window) {
+        eglDestroyContext(output->egl_display, output->egl_context);
+        eglDestroySurface(output->egl_display, output->egl_surface);
+        eglTerminate(output->egl_display);
+
+        wl_egl_window_destroy(output->egl_window);
+    }
+    if (output->mpv) {
+        cflp_warning("Output %s lost, restarting mpv...", output->name);
+        // Quit gently
+        const char* cmd[] = {"quit", NULL};
+        mpv_command_async(output->mpv, 0, cmd);
+        mpv_event* event = mpv_wait_event(output->mpv, 1);
+        while (event->event_id != MPV_EVENT_SHUTDOWN){
+            event = mpv_wait_event(output->mpv, 1);
+        }
+        mpv_render_context_free(output->mpv_context);
+        output->mpv_context = NULL;
+        mpv_terminate_destroy(output->mpv);
+        output->mpv = NULL;
+    }
+    zxdg_output_v1_destroy(output->xdg_output);
+    wl_output_destroy(output->wl_output);
+
+    free(output->name);
+    free(output->identifier);
+    free(output);
+}
+
+static void layer_surface_configure(void *data,
+		struct zwlr_layer_surface_v1 *surface,
+		uint32_t serial, uint32_t width, uint32_t height) {
+    struct display_output *output = data;
+	output->width = width;
+    output->height = height;
+    zwlr_layer_surface_v1_ack_configure(surface, serial);
+
+    init_render_loop(output);
+}
+
+static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *surface) {
+    (void) surface;
+
+    struct display_output *output = data;
+    if (VERBOSE)
+        cflp_info("Destroying output %s (%s)", output->name, output->identifier);
+    destroy_display_output(output);
+}
+
+static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
+	.configure = layer_surface_configure,
+	.closed = layer_surface_closed,
+};
+
+static void find_config(struct display_output *output, const char *name) {
+    struct output_config *config = NULL;
+	wl_list_for_each(config, &output->state->configs, link) {
+		if (strcmp(config->output, name) == 0) {
+			output->config = config;
+            return;
+        }
+    }
+}
+
+static void xdg_output_handle_name(void *data,
+		struct zxdg_output_v1 *xdg_output, const char *name) {
+    (void) xdg_output;
+
+    struct display_output *output = data;
+	output->name = strdup(name);
+
+    // If description was sent first, the config may already be populated. If
+    // there is an identifier config set, keep it.
+    if (!output->config) {
+        find_config(output, name);
+    }
+}
+
+static void xdg_output_handle_description(void *data,
+		struct zxdg_output_v1 *xdg_output, const char *description) {
+    (void) xdg_output;
+
+    struct display_output *output = data;
+
+	// wlroots currently sets the description to `make model serial (name)`
+	// If this changes in the future, this will need to be modified.
+	char *paren = strrchr(description, '(');
+	if (paren) {
+		size_t length = paren - description;
+		output->identifier = malloc(length);
+		if (!output->identifier) {
+            cflp_warning("Failed to allocate output identifier");
+			return;
+		}
+		strncpy(output->identifier, description, length);
+		output->identifier[length - 1] = '\0';
+
+		find_config(output, output->identifier);
+	}
+}
+
+static void create_layer_surface(struct display_output *output) {
+	output->surface = wl_compositor_create_surface(output->state->compositor);
+
+
+	// Empty input region
+    struct wl_region *input_region = wl_compositor_create_region(output->state->compositor);
+
+	wl_surface_set_input_region(output->surface, input_region);
+	wl_region_destroy(input_region);
+
+	output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+        output->state->layer_shell, output->surface, output->wl_output,
+        output->config->layer, "mpvpaper");
+
+    zwlr_layer_surface_v1_set_size(output->layer_surface, 0, 0);
+    zwlr_layer_surface_v1_set_anchor(output->layer_surface,
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+	zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, -1);
+    zwlr_layer_surface_v1_add_listener(output->layer_surface, &layer_surface_listener, output);
+	wl_surface_commit(output->surface);
+
+}
+
+static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output) {
+    (void) xdg_output;
+
+    struct display_output *output = data;
+    if (!output->config) {
+        if (VERBOSE)
+            cflp_warning("Output %s (%s) not selected", output->name, output->identifier);
+        destroy_display_output(output);
+    } else if (!output->layer_surface) {
+        if (VERBOSE)
+            cflp_info("Output %s (%s) selected", output->name, output->identifier);
+		create_layer_surface(output);
+    }
+}
+
+static const struct zxdg_output_v1_listener xdg_output_listener = {
+    .logical_position = nop,
+    .logical_size = nop,
+	.name = xdg_output_handle_name,
+	.description = xdg_output_handle_description,
+	.done = xdg_output_handle_done,
+};
+
+static void handle_global(void *data, struct wl_registry *registry,
+		uint32_t name, const char *interface, uint32_t version) {
+    (void) version;
+
+    struct wl_state *state = data;
+	if (strcmp(interface, wl_compositor_interface.name) == 0) {
+        state->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
+	} else if (strcmp(interface, wl_output_interface.name) == 0) {
+        struct display_output *output = calloc(1, sizeof(struct display_output));
+		output->state = state;
+		output->wl_name = name;
+        output->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 3);
+
+		wl_list_insert(&state->outputs, &output->link);
+
+		if (state->run_display) {
+			output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
+				state->xdg_output_manager, output->wl_output);
+            zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
+		}
+	} else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
+        state->layer_shell = wl_registry_bind(registry, name,
+            &zwlr_layer_shell_v1_interface, 1);
+	} else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
+		state->xdg_output_manager = wl_registry_bind(registry, name,
+			&zxdg_output_manager_v1_interface, 2);
+	}
+}
+
+static void handle_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
+    (void) registry;
+
+    struct wl_state *state = data;
+    struct display_output *output, *tmp;
+	wl_list_for_each_safe(output, tmp, &state->outputs, link) {
+		if (output->wl_name == name) {
+            cflp_info("Destroying output %s (%s)", output->name, output->identifier);
+            destroy_display_output(output);
+			break;
+		}
+    }
+}
+
+static const struct wl_registry_listener registry_listener = {
+	.global = handle_global,
+	.global_remove = handle_global_remove,
+};
+
+static void parse_command_line(int argc, char **argv, struct wl_state *state) {
+
+	static struct option long_options[] = {
+        {"help", no_argument, NULL, 'h'},
+        {"verbose", no_argument, NULL, 'v'},
+        {"fork", no_argument, NULL, 'f'},
+        {"layer", required_argument, NULL, 'l'},
+        {"mpv-options", required_argument, NULL, 'o'},
+		{0, 0, 0, 0}
+	};
+
+	const char *usage =
+        "Usage: mpvpaper [options] <output> <url|path filename>\n"
+        "Options:\n"
+        "--help\t\t-h\tDisplays this help message\n"
+        "--verbose\t-v\tBe more verbose\n"
+        "--fork\t\t-f\tForks mpvpaper so you can close the terminal\n"
+        "--layer\t\t-l\tSpecifies shell layer to run on (background by default)\n"
+        "--mpv-options\t-o\tForwards mpv options (Must be within quotes\"\")\n";
+
+
+    if(argc > 2) {
+        struct output_config *config = calloc(sizeof(struct output_config), 1);
+
+        char *layer_name;
+        char* mpv_options;
+
         char opt;
-        while((opt = getopt_long(argc, argv, "hvfl:o:", opts, NULL)) != -1) {
-            switch(opt) {
+        while((opt = getopt_long(argc, argv, "hvfl:o:", long_options, NULL)) != -1) {
+
+            switch (opt) {
             case 'h':
-                print_usage(argv);
-                break;
+                fprintf(stdout, "%s", usage);
+                exit(EXIT_SUCCESS);
             case 'v':
-                verbose = 1;
+                VERBOSE = 1;
                 break;
             case 'f':
                 if(fork() > 0) {
-                    exit(0);
+                    exit(EXIT_SUCCESS);
                 }
                 fclose(stdout);
                 fclose(stderr);
                 fclose(stdin);
                 break;
             case 'l':
-                layer = optarg;
+                layer_name = strdup(optarg);
+                if(layer_name == NULL) {
+                    config->layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
+                } else if(strcasecmp(layer_name, "top") == 0) {
+                    config->layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+                } else if(strcasecmp(layer_name, "bottom") == 0) {
+                    config->layer = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM;
+                } else if(strcasecmp(layer_name, "background") == 0) {
+                    config->layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
+                } else if(strcasecmp(layer_name, "overlay") == 0) {
+                    config->layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
+                } else {
+                    cflp_error("%s is not a shell layer", layer_name);
+                    exit(EXIT_FAILURE);
+                }
+                wl_list_init(&config->link);  // init for safe removal
                 break;
             case 'o':
                 mpv_options = optarg;
@@ -112,22 +508,96 @@ int main(int argc, char** argv) {
                 for (int i = 0; i < (int)strlen(mpv_options); i++) {
                     if (mpv_options[i] == ' ') mpv_options[i] = '\n';
                 }
-                FILE* config = fopen("/tmp/mpvpaper.conf", "w");
-                fputs(mpv_options, config);
-                fclose(config);
+                FILE* file = fopen("/tmp/mpvpaper.conf", "w");
+                fputs(mpv_options, file);
+                fclose(file);
                 break;
             }
         }
         if(optind + 1 >= argc) {
-            print_usage(argv);
+            fprintf(stderr, "%s", usage);
+            exit(EXIT_FAILURE);
         }
 
-        if(0 == system("pidof swaybg > /dev/null")) {
+        // Setup output config
+        config->output = strdup(argv[optind]);
+        wl_list_init(&config->link);  // init for safe removal
+
+        config->video_path = strdup(argv[optind+1]);
+        wl_list_init(&config->link);  // init for safe removal
+
+        wl_list_insert(&state->configs, &config->link);
+        if (wl_list_empty(&state->configs)) {
+            fprintf(stderr, "%s", usage);
+            exit(EXIT_FAILURE);
+        }
+        config = NULL;
+
+        if(!system("pidof swaybg > /dev/null")) {
             cflp_warning("swaybg is running. This may block mpvpaper from being seen.");
         }
-
-        paper_init(argv[optind], argv[optind + 1], verbose, layer);
-    } else {
-        print_usage(argv);
     }
+    else {
+        fprintf(stderr, "%s", usage);
+        exit(EXIT_FAILURE);
+    }
+
+}
+int main(int argc, char **argv) {
+
+    struct wl_state state = {0};
+	wl_list_init(&state.configs);
+	wl_list_init(&state.outputs);
+
+	parse_command_line(argc, argv, &state);
+
+	state.display = wl_display_connect(NULL);
+	if (!state.display) {
+        cflp_error("Unable to connect to the compositor. "
+				"If your compositor is running, check or set the "
+				"WAYLAND_DISPLAY environment variable.");
+		return 1;
+	}
+
+	struct wl_registry *registry = wl_display_get_registry(state.display);
+	wl_registry_add_listener(registry, &registry_listener, &state);
+	wl_display_roundtrip(state.display);
+    if (state.compositor == NULL || state.layer_shell == NULL ||
+            state.xdg_output_manager == NULL) {
+        cflp_error("Missing a required Wayland interface");
+		return 1;
+	}
+
+    struct display_output *output;
+    wl_list_for_each(output, &state.outputs, link) {
+		output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
+			state.xdg_output_manager, output->wl_output);
+		zxdg_output_v1_add_listener(output->xdg_output,
+            &xdg_output_listener, output);
+    }
+
+    // Check outputs
+    wl_display_roundtrip(state.display);
+    if (wl_list_empty(&state.outputs)) {
+        cflp_error(":/ sorry about this but we can't seem to find any output.");
+        return EXIT_FAILURE;
+    }
+
+    state.run_display = 1;
+    while (wl_display_dispatch(state.display) != -1 && state.run_display) {
+        // NOP
+    }
+
+    struct display_output *tmp_output;
+	wl_list_for_each_safe(output, tmp_output, &state.outputs, link) {
+        destroy_display_output(output);
+	}
+
+    struct output_config *config = NULL, *tmp_config = NULL;
+    wl_list_for_each_safe(config, tmp_config, &state.configs, link) {
+        destroy_output_config(config);
+    }
+
+    remove("/tmp/mpvpaper.conf");
+    return EXIT_SUCCESS;
 }
