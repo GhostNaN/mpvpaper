@@ -20,33 +20,33 @@
 
 
 struct wl_state {
-	struct wl_display *display;
-	struct wl_compositor *compositor;
-	struct zwlr_layer_shell_v1 *layer_shell;
-	struct zxdg_output_manager_v1 *xdg_output_manager;
+    struct wl_display *display;
+    struct wl_compositor *compositor;
+    struct zwlr_layer_shell_v1 *layer_shell;
+    struct zxdg_output_manager_v1 *xdg_output_manager;
     struct wl_list configs;  // struct output_config::link
     struct wl_list outputs;  // struct display_output::link
     int run_display;
 };
 
 struct output_config {
-	char *output;
+    char *output;
     char* video_path;
     int layer;
-	struct wl_list link;
+    struct wl_list link;
 };
 
 struct display_output {
-	uint32_t wl_name;
-	struct wl_output *wl_output;
-	struct zxdg_output_v1 *xdg_output;
-	char *name;
-	char *identifier;
+    uint32_t wl_name;
+    struct wl_output *wl_output;
+    struct zxdg_output_v1 *xdg_output;
+    char *name;
+    char *identifier;
 
     struct wl_state *state;
     struct output_config *config;
 
-	struct wl_surface *surface;
+    struct wl_surface *surface;
     struct zwlr_layer_surface_v1 *layer_surface;
 
     struct wl_egl_window* egl_window;
@@ -57,7 +57,7 @@ struct display_output {
     mpv_handle* mpv;
     mpv_render_context *mpv_context;
 
-	uint32_t width, height;
+    uint32_t width, height;
 
     struct wl_list link;
 };
@@ -222,18 +222,18 @@ static void init_render_loop(struct display_output *output ) {
 }
 
 static void destroy_output_config(struct output_config *config) {
-	if (!config) {
-		return;
-	}
-	wl_list_remove(&config->link);
-	free(config->output);
-	free(config);
+    if (!config) {
+        return;
+    }
+    wl_list_remove(&config->link);
+    free(config->output);
+    free(config);
 }
 
 static void destroy_display_output(struct display_output *output) {
-	if (!output) {
-		return;
-	}
+    if (!output) {
+        return;
+    }
     wl_list_remove(&output->link);
     if (output->layer_surface != NULL) {
         zwlr_layer_surface_v1_destroy(output->layer_surface);
@@ -271,10 +271,10 @@ static void destroy_display_output(struct display_output *output) {
 }
 
 static void layer_surface_configure(void *data,
-		struct zwlr_layer_surface_v1 *surface,
-		uint32_t serial, uint32_t width, uint32_t height) {
+        struct zwlr_layer_surface_v1 *surface,
+        uint32_t serial, uint32_t width, uint32_t height) {
     struct display_output *output = data;
-	output->width = width;
+    output->width = width;
     output->height = height;
     zwlr_layer_surface_v1_ack_configure(surface, serial);
 
@@ -291,26 +291,26 @@ static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *surfa
 }
 
 static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
-	.configure = layer_surface_configure,
-	.closed = layer_surface_closed,
+    .configure = layer_surface_configure,
+    .closed = layer_surface_closed,
 };
 
 static void find_config(struct display_output *output, const char *name) {
     struct output_config *config = NULL;
-	wl_list_for_each(config, &output->state->configs, link) {
-		if (strcmp(config->output, name) == 0) {
-			output->config = config;
+    wl_list_for_each(config, &output->state->configs, link) {
+        if (strcmp(config->output, name) == 0) {
+            output->config = config;
             return;
         }
     }
 }
 
 static void xdg_output_handle_name(void *data,
-		struct zxdg_output_v1 *xdg_output, const char *name) {
+        struct zxdg_output_v1 *xdg_output, const char *name) {
     (void) xdg_output;
 
     struct display_output *output = data;
-	output->name = strdup(name);
+    output->name = strdup(name);
 
     // If description was sent first, the config may already be populated. If
     // there is an identifier config set, keep it.
@@ -320,39 +320,39 @@ static void xdg_output_handle_name(void *data,
 }
 
 static void xdg_output_handle_description(void *data,
-		struct zxdg_output_v1 *xdg_output, const char *description) {
+        struct zxdg_output_v1 *xdg_output, const char *description) {
     (void) xdg_output;
 
     struct display_output *output = data;
 
-	// wlroots currently sets the description to `make model serial (name)`
-	// If this changes in the future, this will need to be modified.
-	char *paren = strrchr(description, '(');
-	if (paren) {
-		size_t length = paren - description;
-		output->identifier = malloc(length);
-		if (!output->identifier) {
+    // wlroots currently sets the description to `make model serial (name)`
+    // If this changes in the future, this will need to be modified.
+    char *paren = strrchr(description, '(');
+    if (paren) {
+        size_t length = paren - description;
+        output->identifier = malloc(length);
+        if (!output->identifier) {
             cflp_warning("Failed to allocate output identifier");
-			return;
-		}
-		strncpy(output->identifier, description, length);
-		output->identifier[length - 1] = '\0';
+            return;
+        }
+        strncpy(output->identifier, description, length);
+        output->identifier[length - 1] = '\0';
 
-		find_config(output, output->identifier);
-	}
+        find_config(output, output->identifier);
+    }
 }
 
 static void create_layer_surface(struct display_output *output) {
-	output->surface = wl_compositor_create_surface(output->state->compositor);
+    output->surface = wl_compositor_create_surface(output->state->compositor);
 
 
-	// Empty input region
+    // Empty input region
     struct wl_region *input_region = wl_compositor_create_region(output->state->compositor);
 
-	wl_surface_set_input_region(output->surface, input_region);
-	wl_region_destroy(input_region);
+    wl_surface_set_input_region(output->surface, input_region);
+    wl_region_destroy(input_region);
 
-	output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+    output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
         output->state->layer_shell, output->surface, output->wl_output,
         output->config->layer, "mpvpaper");
 
@@ -362,9 +362,9 @@ static void create_layer_surface(struct display_output *output) {
         ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
         ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
         ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
-	zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, -1);
+    zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, -1);
     zwlr_layer_surface_v1_add_listener(output->layer_surface, &layer_surface_listener, output);
-	wl_surface_commit(output->surface);
+    wl_surface_commit(output->surface);
 
 }
 
@@ -379,45 +379,45 @@ static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output
     } else if (!output->layer_surface) {
         if (VERBOSE)
             cflp_info("Output %s (%s) selected", output->name, output->identifier);
-		create_layer_surface(output);
+        create_layer_surface(output);
     }
 }
 
 static const struct zxdg_output_v1_listener xdg_output_listener = {
     .logical_position = nop,
     .logical_size = nop,
-	.name = xdg_output_handle_name,
-	.description = xdg_output_handle_description,
-	.done = xdg_output_handle_done,
+    .name = xdg_output_handle_name,
+    .description = xdg_output_handle_description,
+    .done = xdg_output_handle_done,
 };
 
 static void handle_global(void *data, struct wl_registry *registry,
-		uint32_t name, const char *interface, uint32_t version) {
+        uint32_t name, const char *interface, uint32_t version) {
     (void) version;
 
     struct wl_state *state = data;
-	if (strcmp(interface, wl_compositor_interface.name) == 0) {
+    if (strcmp(interface, wl_compositor_interface.name) == 0) {
         state->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
-	} else if (strcmp(interface, wl_output_interface.name) == 0) {
+    } else if (strcmp(interface, wl_output_interface.name) == 0) {
         struct display_output *output = calloc(1, sizeof(struct display_output));
-		output->state = state;
-		output->wl_name = name;
+        output->state = state;
+        output->wl_name = name;
         output->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 3);
 
-		wl_list_insert(&state->outputs, &output->link);
+        wl_list_insert(&state->outputs, &output->link);
 
-		if (state->run_display) {
-			output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
-				state->xdg_output_manager, output->wl_output);
+        if (state->run_display) {
+            output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
+                state->xdg_output_manager, output->wl_output);
             zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
-		}
-	} else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
+        }
+    } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
         state->layer_shell = wl_registry_bind(registry, name,
             &zwlr_layer_shell_v1_interface, 1);
-	} else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
-		state->xdg_output_manager = wl_registry_bind(registry, name,
-			&zxdg_output_manager_v1_interface, 2);
-	}
+    } else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
+        state->xdg_output_manager = wl_registry_bind(registry, name,
+            &zxdg_output_manager_v1_interface, 2);
+    }
 }
 
 static void handle_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
@@ -425,32 +425,32 @@ static void handle_global_remove(void *data, struct wl_registry *registry, uint3
 
     struct wl_state *state = data;
     struct display_output *output, *tmp;
-	wl_list_for_each_safe(output, tmp, &state->outputs, link) {
-		if (output->wl_name == name) {
+    wl_list_for_each_safe(output, tmp, &state->outputs, link) {
+        if (output->wl_name == name) {
             cflp_info("Destroying output %s (%s)", output->name, output->identifier);
             destroy_display_output(output);
-			break;
-		}
+            break;
+        }
     }
 }
 
 static const struct wl_registry_listener registry_listener = {
-	.global = handle_global,
-	.global_remove = handle_global_remove,
+    .global = handle_global,
+    .global_remove = handle_global_remove,
 };
 
 static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
-	static struct option long_options[] = {
+    static struct option long_options[] = {
         {"help", no_argument, NULL, 'h'},
         {"verbose", no_argument, NULL, 'v'},
         {"fork", no_argument, NULL, 'f'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
-		{0, 0, 0, 0}
-	};
+        {0, 0, 0, 0}
+    };
 
-	const char *usage =
+    const char *usage =
         "Usage: mpvpaper [options] <output> <url|path filename>\n"
         "Options:\n"
         "--help\t\t-h\tDisplays this help message\n"
@@ -546,33 +546,33 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 int main(int argc, char **argv) {
 
     struct wl_state state = {0};
-	wl_list_init(&state.configs);
-	wl_list_init(&state.outputs);
+    wl_list_init(&state.configs);
+    wl_list_init(&state.outputs);
 
-	parse_command_line(argc, argv, &state);
+    parse_command_line(argc, argv, &state);
 
-	state.display = wl_display_connect(NULL);
-	if (!state.display) {
+    state.display = wl_display_connect(NULL);
+    if (!state.display) {
         cflp_error("Unable to connect to the compositor. "
-				"If your compositor is running, check or set the "
-				"WAYLAND_DISPLAY environment variable.");
-		return 1;
-	}
+                "If your compositor is running, check or set the "
+                "WAYLAND_DISPLAY environment variable.");
+        return 1;
+    }
 
-	struct wl_registry *registry = wl_display_get_registry(state.display);
-	wl_registry_add_listener(registry, &registry_listener, &state);
-	wl_display_roundtrip(state.display);
+    struct wl_registry *registry = wl_display_get_registry(state.display);
+    wl_registry_add_listener(registry, &registry_listener, &state);
+    wl_display_roundtrip(state.display);
     if (state.compositor == NULL || state.layer_shell == NULL ||
             state.xdg_output_manager == NULL) {
         cflp_error("Missing a required Wayland interface");
-		return 1;
-	}
+        return 1;
+    }
 
     struct display_output *output;
     wl_list_for_each(output, &state.outputs, link) {
-		output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
-			state.xdg_output_manager, output->wl_output);
-		zxdg_output_v1_add_listener(output->xdg_output,
+        output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
+            state.xdg_output_manager, output->wl_output);
+        zxdg_output_v1_add_listener(output->xdg_output,
             &xdg_output_listener, output);
     }
 
@@ -589,9 +589,9 @@ int main(int argc, char **argv) {
     }
 
     struct display_output *tmp_output;
-	wl_list_for_each_safe(output, tmp_output, &state.outputs, link) {
+    wl_list_for_each_safe(output, tmp_output, &state.outputs, link) {
         destroy_display_output(output);
-	}
+    }
 
     struct output_config *config = NULL, *tmp_config = NULL;
     wl_list_for_each_safe(config, tmp_config, &state.configs, link) {
