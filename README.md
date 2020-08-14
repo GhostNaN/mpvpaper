@@ -1,7 +1,6 @@
 ![Preview](https://github.com/GhostNaN/mpvpaper/blob/assests/preview.png)
 # MPVPaper
-### MPVPaper is a wallpaper program for wlroots based wayland compositors such as sway that allows you to ~~render glsl shaders~~ play videos with mpv as your wallpaper.
-###### Or a fork of glpaper that plays videos using mpv, instead of rendering shaders.
+### MPVPaper is a wallpaper program for wlroots based wayland compositors, such as sway. That allows you to play videos with mpv as your wallpaper.
 
 ## Dependencies
 - mpv
@@ -62,7 +61,7 @@ And make sure you don't let swaybg stand in your way:
 killall swaybg
 ```
 ## Acknowledgments
-- glpaper for the boilerplate code, check em out here:
+- glpaper for the initial boilerplate code, check em out here:
   - https://hg.sr.ht/~scoopta/glpaper
 ## License
 This project is licensed under the GPLv3 License - see the [LICENSE](/LICENSE) file for details
