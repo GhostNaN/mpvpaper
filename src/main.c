@@ -201,11 +201,11 @@ static void init_egl(struct display_output *output) {
     gladLoadGLLoader((GLADloadproc) eglGetProcAddress);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glViewport(0, 0, output->width, output->height);    
+    glViewport(0, 0, output->width, output->height);
 }
 
 static void destroy_display_output(struct display_output *output) {
-    if (!output) {
+    if (!output || !output->name) {
         return;
     }
     wl_list_remove(&output->link);
