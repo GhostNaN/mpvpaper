@@ -38,8 +38,6 @@ struct display_output {
     char *identifier;
 
     struct wl_state *state;
-    struct output_config *config;
-
     struct wl_surface *surface;
     struct zwlr_layer_surface_v1 *layer_surface;
 
@@ -205,7 +203,7 @@ static void init_egl(struct display_output *output) {
 }
 
 static void destroy_display_output(struct display_output *output) {
-    if (!output || !output->name) {
+    if (!output) {
         return;
     }
     wl_list_remove(&output->link);
@@ -215,7 +213,7 @@ static void destroy_display_output(struct display_output *output) {
     if (output->surface != NULL) {
         wl_surface_destroy(output->surface);
     }
-    if (egl_display) {
+    if (egl_display && output->name == output->state->monitor) {
         eglDestroySurface(egl_display, egl_surface);
         wl_egl_window_destroy(egl_window);
     }
