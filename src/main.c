@@ -213,7 +213,7 @@ static void destroy_display_output(struct display_output *output) {
     if (output->surface != NULL) {
         wl_surface_destroy(output->surface);
     }
-    if (egl_display && output->name == output->state->monitor) {
+    if (egl_display && strcmp(output->name,output->state->monitor) == 0) {
         eglDestroySurface(egl_display, egl_surface);
         wl_egl_window_destroy(egl_window);
     }
