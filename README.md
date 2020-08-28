@@ -31,6 +31,9 @@ ninja -C build install
 ### Arch Based:
 AUR package: https://aur.archlinux.org/packages/mpvpaper-git/
 
+### Gentoo:
+GURU package: https://gpo.zugaina.org/Overlays/guru/gui-apps/mpvpaper/
+
 ## Usage
 ### Running
 Simple example:
