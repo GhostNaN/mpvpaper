@@ -115,20 +115,25 @@ static void init_mpv(struct display_output *output) {
     const char *homedir = getenv("HOME");
     char *configcat = (char *) malloc(sizeof(homedir) + 30);
 
-    int load_count = 0;
+    char loaded_configs[50] = "";
 
     strcpy(configcat, homedir);
     if (mpv_load_config_file(mpv, strcat(configcat, "/.config/mpv/mpv.conf")) == 0)
-        load_count += 1;
+        strcat(loaded_configs, "mpv.conf ");
     strcpy(configcat, homedir);
     if (mpv_load_config_file(mpv, strcat(configcat, "/.config/mpv/input.conf")) == 0)
-        load_count += 1;
+        strcat(loaded_configs, "input.conf ");
     strcpy(configcat, homedir);
     if(mpv_load_config_file(mpv, strcat(configcat, "/.config/mpv/fonts.conf")) == 0)
-        load_count += 1;
+        strcat(loaded_configs, "fonts.conf ");
 
-    if (VERBOSE)
-        cflp_info("%i/3 User configs loaded from \"~/.config\"", load_count);
+    if (VERBOSE && strcmp(loaded_configs, ""))
+        cflp_info("Loaded [ %s] user configs from \"~/.config\"", loaded_configs);
+
+    // Enable user control through terminal
+    mpv_set_option_string(mpv, "input-default-bindings", "yes");
+    mpv_set_option_string(mpv, "input-terminal", "yes");
+    mpv_set_option_string(mpv, "terminal", "yes");
 
     // Set mpv_options passed
     mpv_load_config_file(mpv, "/tmp/mpvpaper.conf");
