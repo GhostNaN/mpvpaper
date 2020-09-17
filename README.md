@@ -45,7 +45,11 @@ You can also forward mpv options by passing "--mpv-options" or "-o" like so:
 mpvpaper -o "no-audio --loop-playlist shuffle" HDMI-A-1 www.url/to/playlist
 ```
 ### Controlling
-If you would like to control MPVPaper while it's running, use a mpv input-ipc-server like this:
+If MPVPaper is running in a terminal and is not forked:
+
+Simply enter your keyboard key bindings directly into the terminal.
+
+Else if you would like to control MPVPaper while it's forked, use a mpv input-ipc-server like this:
 ```
 mpvpaper -o "input-ipc-server=/tmp/mpv-socket" DP-1 /path/to/video
 ```
