@@ -3,7 +3,6 @@
 #include <string.h>
 #include <getopt.h>
 #include <unistd.h>
-#include <pthread.h>
 
 #include <wayland-client.h>
 #include <wayland-egl.h>
@@ -112,8 +111,27 @@ static void init_mpv(struct display_output *output) {
         exit(EXIT_FAILURE);
     }
 
+    // Load user configs
+    const char *homedir = getenv("HOME");
+    char *configcat = (char *) malloc(sizeof(homedir) + 30);
+
+    int load_count = 0;
+
+    strcpy(configcat, homedir);
+    if (mpv_load_config_file(mpv, strcat(configcat, "/.config/mpv/mpv.conf")) == 0)
+        load_count += 1;
+    strcpy(configcat, homedir);
+    if (mpv_load_config_file(mpv, strcat(configcat, "/.config/mpv/input.conf")) == 0)
+        load_count += 1;
+    strcpy(configcat, homedir);
+    if(mpv_load_config_file(mpv, strcat(configcat, "/.config/mpv/fonts.conf")) == 0)
+        load_count += 1;
+
+    if (VERBOSE)
+        cflp_info("%i/3 User configs loaded from \"~/.config\"", load_count);
+
     // Set mpv_options passed
-    mpv_set_option_string(mpv, "include", "/tmp/mpvpaper.conf");
+    mpv_load_config_file(mpv, "/tmp/mpvpaper.conf");
     remove("/tmp/mpvpaper.conf");
 
     if (mpv_initialize(mpv) < 0) {
