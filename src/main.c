@@ -3,6 +3,10 @@
 #include <string.h>
 #include <getopt.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <time.h>
+#include <stdbool.h>
+#include <signal.h>
 
 #include <wayland-client.h>
 #include <wayland-egl.h>
@@ -26,7 +30,7 @@ struct wl_state {
     struct wl_list outputs;  // struct display_output::link
     char* monitor; // User selected output
     int surface_layer;
-    int run_display;
+    bool run_display;
 };
 
 struct display_output {
@@ -50,22 +54,52 @@ static EGLDisplay *egl_display;
 static EGLContext *egl_context;
 static EGLSurface *egl_surface;
 
-static mpv_handle* mpv;
+static mpv_handle *mpv;
 static mpv_render_context *mpv_glcontext;
-static char* video_path;
+static char *video_path;
 
-static int VERBOSE = 0;
+static struct {
+    char **pauselist;
+    char **stoplist;
+    char **argv_copy;
+    char *save_info;
+
+    bool auto_pause;
+    bool auto_stop;
+
+    bool frame_ready;
+
+} halt_info = {NULL, NULL, NULL, NULL, 0, 0, 0};
+
+static bool VERBOSE = 0;
 
 static void nop() {}
+
+static void exit_mpvpaper(int reason) {
+
+    if (mpv_glcontext)
+       mpv_render_context_free(mpv_glcontext);
+    if (mpv)
+        mpv_terminate_destroy(mpv);
+
+    if (egl_surface)
+        eglDestroySurface(egl_display, egl_surface);
+    if (egl_context)
+        eglDestroyContext(egl_display, egl_context);
+    if (egl_window)
+        wl_egl_window_destroy(egl_window);
+
+    exit(reason);
+}
+
+static void handle_signal(int signum) {
+    (void) signum;
+    exit_mpvpaper(1);
+}
 
 const static struct wl_callback_listener wl_surface_frame_listener;
 
 static void render(struct display_output *output) {
-    mpv_event* event = mpv_wait_event(mpv, 0);
-    if (event->event_id == MPV_EVENT_SHUTDOWN || event->event_id == MPV_EVENT_IDLE) {
-        exit(EXIT_SUCCESS);
-    }
-
     mpv_render_param render_params[] = {
         {MPV_RENDER_PARAM_OPENGL_FBO, &(mpv_opengl_fbo){
             .fbo = 0,
@@ -83,20 +117,190 @@ static void render(struct display_output *output) {
     wl_callback_add_listener(callback, &wl_surface_frame_listener, output);
 
     // Display frame
-    if (!eglSwapBuffers(egl_display, egl_surface)) {
+    if (!eglSwapBuffers(egl_display, egl_surface))
         cflp_error("Failed to swap egl buffers 0x%X", eglGetError());
-    }
 }
 
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t time) {
     (void) time;
     wl_callback_destroy(callback);
+
+    // Reset deadman switch timer
+    halt_info.frame_ready = 1;
+
+    // Shutdown when done
+    mpv_event* event = mpv_wait_event(mpv, 0);
+    if (event->event_id == MPV_EVENT_SHUTDOWN || event->event_id == MPV_EVENT_IDLE)
+        exit_mpvpaper(0);
+
+    // Render next frame
     render(data);
 }
 
 const static struct wl_callback_listener wl_surface_frame_listener = {
     .done = frame_handle_done,
 };
+
+static void stop_mpvpaper() {
+
+    // Save video position to arg -Z
+    const char* time_pos = mpv_get_property_string(mpv, "time-pos");
+    const char* playlist_pos = mpv_get_property_string(mpv, "playlist-pos");
+
+    char save_info[30];
+    sprintf(save_info, "%s %s", time_pos, playlist_pos);
+
+    int argv_alloc_size = strlen("-Z")+1 + strlen(save_info)+1;
+    for(uint i=0;  halt_info.argv_copy[i] != NULL; i++) {
+        argv_alloc_size += strlen(halt_info.argv_copy[i])+1;
+    }
+    char **argv = calloc(argv_alloc_size+1, sizeof(char));
+
+    uint i = 0;
+    for(i=0; halt_info.argv_copy[i] != NULL; i++) {
+        argv[i] = strdup(halt_info.argv_copy[i]);
+    }
+    argv[i] = "-Z";
+    argv[i+1] = save_info;
+    argv[i+2] = NULL;
+
+    // Get the "real" cwd
+    char exe_dir[1024];
+    int cut_point = readlink("/proc/self/exe", exe_dir, sizeof(exe_dir));
+    for(uint i=cut_point; i > 1; i--) {
+        if (exe_dir[i] == '/') {
+            exe_dir[i+1] = '\0';
+            break;
+        }
+    }
+    // Start holder script
+    execv(strcat(exe_dir, "mpvpaper-holder"), argv);
+
+    cflp_warning("Failed to stop mpvpaper");
+    halt_info.auto_stop = 0;
+    halt_info.stoplist = NULL;
+}
+
+static char *check_halt_list(char ***list);
+
+static void pause_for_halt_list(const char *app) {
+
+    mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "yes", NULL});
+
+    char pid_name[512] = {0};
+    strcpy(pid_name, "pidof ");
+    strcat(pid_name, app);
+    strcat(pid_name, " > /dev/null");
+
+    while(!system(pid_name)) {
+        sleep(1);
+        // Priorize stop halt list
+        if (halt_info.stoplist) {
+            char *app = check_halt_list(&halt_info.stoplist);
+            if (app) {
+                if (VERBOSE)
+                    cflp_info("Stopping for %s", app);
+                stop_mpvpaper();
+            }
+        }
+    }
+    mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "no", NULL});
+}
+
+static char *check_halt_list(char ***list) {
+    char pid_name[512] = {0};
+
+    for (uint i=0; (*list)[i] != NULL; i++) {
+        strcpy(pid_name, "pidof ");
+        strcat(pid_name, (*list)[i]);
+        strcat(pid_name, " > /dev/null");
+
+        // Stop if program is open
+        if (!system(pid_name)) {
+            return (*list)[i];
+        }
+    }
+    return NULL;
+}
+
+static void *handle_halt_lists() {
+    pthread_detach(pthread_self());
+
+    while (1) {
+        if (halt_info.pauselist) { // Check if already paused
+            if (strcmp(mpv_get_property_string(mpv, "pause"), "no") == 0) {
+                char *app = check_halt_list(&halt_info.pauselist);
+                if (app) {
+                    if (VERBOSE)
+                        cflp_info("Pausing for %s", app);
+                    pause_for_halt_list(app);
+                }
+            }
+        }
+
+        if (halt_info.stoplist) {
+            char *app = check_halt_list(&halt_info.stoplist);
+            if (app) {
+                if (VERBOSE)
+                    cflp_info("Stopping for %s", app);
+                stop_mpvpaper();
+            }
+        }
+        sleep(1);
+    }
+    pthread_exit(NULL);
+}
+
+static void *handle_auto_pause() {
+    pthread_detach(pthread_self());
+
+    while (halt_info.auto_pause) {
+        if (strcmp(mpv_get_property_string(mpv, "pause"), "no") == 0) { // Check if already paused
+            time_t start_time = time(NULL);
+            bool is_paused = 0;
+
+            // Set deadman switch timer
+            halt_info.frame_ready = 0;
+            while(!halt_info.frame_ready) {
+                if ((time(NULL) - start_time) > 1 && !is_paused) {
+                    if (VERBOSE)
+                        cflp_info("Pausing because mpvpaper is not visible");
+
+                    mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "yes", NULL});
+                    is_paused = 1;
+                }
+                usleep(10000);
+            }
+            if (is_paused)
+                mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "no", NULL});
+        }
+
+        sleep(1);
+    }
+    pthread_exit(NULL);
+}
+
+static void *handle_auto_stop() {
+    pthread_detach(pthread_self());
+
+    while (halt_info.auto_stop) {
+        time_t start_time = time(NULL);
+
+        // Set deadman switch timer
+        halt_info.frame_ready = 0;
+        while(!halt_info.frame_ready) {
+            if ((time(NULL) - start_time) > 1) {
+                if (VERBOSE)
+                    cflp_info("Stopping because mpvpaper is not visible");
+                stop_mpvpaper();
+                break;
+            }
+            usleep(10000);
+        }
+        sleep(1);
+    }
+    pthread_exit(NULL);
+}
 
 static void *get_proc_address_mpv(void *ctx, const char *name){
     (void) ctx;
@@ -108,32 +312,34 @@ static void init_mpv(struct display_output *output) {
     mpv = mpv_create();
     if (!mpv) {
         cflp_error("Failed creating mpv context");
-        exit(EXIT_FAILURE);
+        exit_mpvpaper(1);
     }
 
-    // Load user configs
-    const char *homedir = getenv("HOME");
-    char *configcat = (char *) malloc(sizeof(homedir) + 30);
-
-    char loaded_configs[50] = "";
-
-    strcpy(configcat, homedir);
-    if (mpv_load_config_file(mpv, strcat(configcat, "/.config/mpv/mpv.conf")) == 0)
-        strcat(loaded_configs, "mpv.conf ");
-    strcpy(configcat, homedir);
-    if (mpv_load_config_file(mpv, strcat(configcat, "/.config/mpv/input.conf")) == 0)
-        strcat(loaded_configs, "input.conf ");
-    strcpy(configcat, homedir);
-    if(mpv_load_config_file(mpv, strcat(configcat, "/.config/mpv/fonts.conf")) == 0)
-        strcat(loaded_configs, "fonts.conf ");
-
-    if (VERBOSE && strcmp(loaded_configs, ""))
-        cflp_info("Loaded [ %s] user configs from \"~/.config\"", loaded_configs);
-
-    // Enable user control through terminal
+    // Enable user control through terminal by default
     mpv_set_option_string(mpv, "input-default-bindings", "yes");
     mpv_set_option_string(mpv, "input-terminal", "yes");
     mpv_set_option_string(mpv, "terminal", "yes");
+
+    // Load user configs
+    const char *home_dir = getenv("HOME");
+    char *config_path = calloc(strlen(home_dir)+1 + 30, sizeof(char));
+    strcpy(config_path, home_dir);
+
+    char loaded_configs[50] = "";
+
+    strcpy(config_path+strlen(home_dir), "/.config/mpv/mpv.conf");
+    if (mpv_load_config_file(mpv, config_path) == 0)
+        strcat(loaded_configs, "mpv.conf ");
+    strcpy(config_path+strlen(home_dir), "/.config/mpv/input.conf");
+    if (mpv_load_config_file(mpv, config_path) == 0)
+        strcat(loaded_configs, "input.conf ");
+    strcpy(config_path+strlen(home_dir), "/.config/mpv/fonts.conf");
+    if(mpv_load_config_file(mpv, config_path) == 0)
+        strcat(loaded_configs, "fonts.conf ");
+    free(config_path);
+
+    if (VERBOSE && strcmp(loaded_configs, ""))
+        cflp_info("Loaded [ %s] user configs from \"~/.config/mpv/\"", loaded_configs);
 
     // Set mpv_options passed
     mpv_load_config_file(mpv, "/tmp/mpvpaper.conf");
@@ -141,7 +347,7 @@ static void init_mpv(struct display_output *output) {
 
     if (mpv_initialize(mpv) < 0) {
         cflp_error("mpv init failed");
-        exit(EXIT_FAILURE);
+        exit_mpvpaper(1);
     }
     // Have mpv render onto egl context
     mpv_render_param params[] = {
@@ -154,16 +360,33 @@ static void init_mpv(struct display_output *output) {
     if (mpv_render_context_create(&mpv_glcontext, mpv, params) < 0)
         cflp_error("Failed to initialize mpv GL context");
 
-    const char* cmd[] = {"loadfile", video_path, NULL};
-    mpv_command_async(mpv, 0, cmd);
+    // Restore video position after auto stop event
+    char* default_start = NULL;
+    if (halt_info.save_info) {
+        char time_pos[10];
+        char playlist_pos[10];
+        sscanf(halt_info.save_info, "%s %s", time_pos, playlist_pos);
+
+        // Save default start pos
+        default_start = mpv_get_property_string(mpv, "start");
+        // Restore video position
+        mpv_command_async(mpv, 0, (const char*[]) {"set", "start", time_pos, NULL});
+        // Recover playlist pos, that is if it's not shuffled...
+        mpv_command_async(mpv, 0, (const char*[]) {"set", "playlist-start", playlist_pos, NULL});
+    }
+
+    mpv_command_async(mpv, 0, (const char*[]) {"loadfile", video_path, NULL});
 
     mpv_event* event = mpv_wait_event(mpv, 1);
     while (event->event_id != MPV_EVENT_FILE_LOADED){
         event = mpv_wait_event(mpv, 1);
     }
-    if (VERBOSE) {
+    if (VERBOSE)
         cflp_info("Loaded %s", video_path);
-    }
+
+    // Return start pos to default
+    if (default_start)
+        mpv_command_async(mpv, 0, (const char*[]) {"set", "start", default_start, NULL});
 }
 
 static void init_egl(struct display_output *output) {
@@ -195,7 +418,7 @@ static void init_egl(struct display_output *output) {
             {0, 0}
         };
         egl_context = NULL;
-        for (int i = 0; gl_versions[i].major > 0; i++) {
+        for (uint i = 0; gl_versions[i].major > 0; i++) {
             const EGLint ctx_attrib[] = {
                 EGL_CONTEXT_MAJOR_VERSION, gl_versions[i].major,
                 EGL_CONTEXT_MINOR_VERSION, gl_versions[i].major,
@@ -211,7 +434,7 @@ static void init_egl(struct display_output *output) {
         }
         if (!egl_context) {
             cflp_error("Failed to create EGL context");
-            exit(EXIT_FAILURE);
+            exit_mpvpaper(1);
         }
     }
 
@@ -259,7 +482,19 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     init_egl(output);
     if (!mpv) {
         init_mpv(output);
+
+        // Thread for monitoring if mpvpaper is visible
+        pthread_t visibility_thread;
+        if (halt_info.auto_pause)
+            pthread_create(&visibility_thread, NULL, handle_auto_pause, NULL);
+        else if (halt_info.auto_stop)
+            pthread_create(&visibility_thread, NULL, handle_auto_stop, NULL);
+        // Thread for monitoring halt lists
+        pthread_t halt_thread;
+        if (halt_info.pauselist || halt_info.stoplist)
+            pthread_create(&halt_thread, NULL, handle_halt_lists, NULL);
     }
+
     if (egl_display && mpv_glcontext) {
         // Start render loop
         render(output);
@@ -285,7 +520,6 @@ static void create_layer_surface(struct display_output *output) {
 
     // Empty input region
     struct wl_region *input_region = wl_compositor_create_region(output->state->compositor);
-
     wl_surface_set_input_region(output->surface, input_region);
     wl_region_destroy(input_region);
 
@@ -302,7 +536,6 @@ static void create_layer_surface(struct display_output *output) {
     zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, -1);
     zwlr_layer_surface_v1_add_listener(output->layer_surface, &layer_surface_listener, output);
     wl_surface_commit(output->surface);
-
 }
 
 static void xdg_output_handle_name(void *data,
@@ -324,7 +557,7 @@ static void xdg_output_handle_description(void *data,
     char *paren = strrchr(description, '(');
     if (paren) {
         size_t length = paren - description;
-        output->identifier = malloc(length);
+        output->identifier = calloc(length, sizeof(char));
         if (!output->identifier) {
             cflp_warning("Failed to allocate output identifier");
             return;
@@ -407,12 +640,51 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = handle_global_remove,
 };
 
+static char **get_halt_list(char *path_name) {
+
+    FILE *file = fopen(path_name, "r");
+    if (file) {
+        // Get alloc size
+        fseek(file, 0L, SEEK_END);
+        char **list = calloc(ftell(file) + 1, sizeof(char));
+        rewind(file);
+
+        // Read lines
+        char app[512];
+        for (uint i=0; fscanf(file, "%s", app) == 1; i++) {
+            list[i] = strdup(app);
+        }
+
+        fclose(file);
+        return list;
+    }
+    return NULL;
+}
+
+static void set_halt_lists() {
+    const char *home_dir = getenv("HOME");
+
+    char *pause_path = calloc(strlen(home_dir)+1 + strlen("/.config/mpvpaper/pauselist")+1, sizeof(char));
+    strcpy(pause_path, home_dir);
+    strcat(pause_path, "/.config/mpvpaper/pauselist");
+    halt_info.pauselist = get_halt_list(pause_path);
+    free(pause_path);
+
+    char *stop_path = calloc(strlen(home_dir)+1 + strlen("/.config/mpvpaper/stoplist")+1, sizeof(char));
+    strcpy(stop_path, home_dir);
+    strcat(stop_path, "/.config/mpvpaper/stoplist");
+    halt_info.stoplist = get_halt_list(stop_path);
+    free(stop_path);
+}
+
 static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
     static struct option long_options[] = {
         {"help", no_argument, NULL, 'h'},
         {"verbose", no_argument, NULL, 'v'},
         {"fork", no_argument, NULL, 'f'},
+        {"auto-pause", no_argument, NULL, 'p'},
+        {"auto-stop", no_argument, NULL, 's'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
         {0, 0, 0, 0}
@@ -421,19 +693,23 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
     const char *usage =
         "Usage: mpvpaper [options] <output> <url|path filename>\n"
         "Options:\n"
-        "--help\t\t-h\tDisplays this help message\n"
-        "--verbose\t-v\tBe more verbose\n"
-        "--fork\t\t-f\tForks mpvpaper so you can close the terminal\n"
-        "--layer\t\t-l\tSpecifies shell surface layer to run on (background by default)\n"
-        "--mpv-options\t-o\tForwards mpv options (Must be within quotes\"\")\n";
+        "--help         -h    Displays this help message\n"
+        "--verbose      -v    Be more verbose\n"
+        "--fork         -f    Forks mpvpaper so you can close the terminal\n"
+        "--auto-pause   -p    Automagically pause mpv when the wallpaper is hidden\n"
+        "                     This saves CPU usage, more or less, seamlessly\n"
+        "--auto-stop    -s    Automagically stop mpv when the wallpaper is hidden\n"
+        "                     This saves CPU/RAM usage, although more abruptly\n"
+        "--layer        -l    Specifies shell surface layer to run on (background by default)\n"
+        "--mpv-options  -o    Forwards mpv options (Must be within quotes\"\")\n";
 
 
     if(argc > 2) {
-        char* layer_name;
-        char* mpv_options;
+        char *layer_name;
+        char *mpv_options;
 
         char opt;
-        while((opt = getopt_long(argc, argv, "hvfl:o:", long_options, NULL)) != -1) {
+        while((opt = getopt_long(argc, argv, "hvfpsl:o:Z:", long_options, NULL)) != -1) {
 
             switch (opt) {
             case 'h':
@@ -450,6 +726,14 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 fclose(stderr);
                 fclose(stdin);
                 break;
+            case 'p':
+                halt_info.auto_pause = 1;
+                halt_info.auto_stop = 0;
+                break;
+            case 's':
+                halt_info.auto_stop = 1;
+                halt_info.auto_pause = 0;
+                break;
             case 'l':
                 layer_name = strdup(optarg);
                 if(layer_name == NULL) {
@@ -463,19 +747,25 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 } else if(strcasecmp(layer_name, "overlay") == 0) {
                     state->surface_layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
                 } else {
-                    cflp_error("%s is not a shell surface layer", layer_name);
+                    cflp_error("%s is not a shell surface layer\n"
+                               "Your options are: top, bottom, background and overlay", layer_name);
                     exit(EXIT_FAILURE);
                 }
                 break;
             case 'o':
-                mpv_options = optarg;
+                mpv_options = strdup(optarg);
                 // Forward to a tmp file so mpv can parse options
                 for (int i = 0; i < (int)strlen(mpv_options); i++) {
-                    if (mpv_options[i] == ' ') mpv_options[i] = '\n';
+                    if (mpv_options[i] == ' ')
+                        mpv_options[i] = '\n';
                 }
                 FILE* file = fopen("/tmp/mpvpaper.conf", "w");
                 fputs(mpv_options, file);
                 fclose(file);
+                break;
+
+            case 'Z': // Hidden option to recover video pos after stopping
+                halt_info.save_info = strdup(optarg);
                 break;
             }
         }
@@ -495,14 +785,34 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         fprintf(stderr, "%s", usage);
         exit(EXIT_FAILURE);
     }
-
 }
+
 int main(int argc, char **argv) {
+    signal(SIGINT, handle_signal);
 
     struct wl_state state = {0};
     wl_list_init(&state.outputs);
 
     parse_command_line(argc, argv, &state);
+    set_halt_lists();
+
+    // Copy argv
+    int argv_alloc_size = 0;
+    for(int i=0; argv[i] != NULL; i++) {
+        argv_alloc_size += strlen(argv[i])+1;
+    }
+    halt_info.argv_copy = calloc(argv_alloc_size, sizeof(char));
+
+    int j = 0;
+    for(int i=0; i < argc; i++) {
+        if (strcmp(argv[i], "-Z") == 0) { // Remove hidden opt
+            i++; // Skip optind
+        }
+        else {
+            halt_info.argv_copy[j] = strdup(argv[i]);
+            j++;
+        }
+    }
 
     state.display = wl_display_connect(NULL);
     if (!state.display) {
@@ -537,7 +847,7 @@ int main(int argc, char **argv) {
     }
 
     state.run_display = 1;
-    while (wl_display_dispatch(state.display) != -1 && state.run_display) {
+    while (wl_display_dispatch(state.display) != -1) {
         // NOP
     }
 
