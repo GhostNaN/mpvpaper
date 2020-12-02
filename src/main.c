@@ -88,11 +88,8 @@ static void exit_cleanup() {
 
     // Give mpv a chance to finish
     halt_info.kill_render_loop = 1;
-    int trys = 10;
-    halt_info.frame_ready = 0;
-    while (!halt_info.frame_ready && trys > 0) {
+    for (int trys=10; halt_info.kill_render_loop && trys > 0; trys--) {
         usleep(10000);
-        trys--;
     }
 
     if (mpv_glcontext)
@@ -115,9 +112,13 @@ static void exit_mpvpaper(int reason) {
     exit(reason);
 }
 
+static void *exit_by_pthread() { exit_mpvpaper(1); pthread_exit(NULL);}
+
 static void handle_signal(int signum) {
     (void) signum;
-    exit_mpvpaper(1);
+    // Separate thread to avoid crash
+    pthread_t thread;
+    pthread_create(&thread, NULL, exit_by_pthread, NULL);
 }
 
 const static struct wl_callback_listener wl_surface_frame_listener;
@@ -164,6 +165,8 @@ static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t
     // Render next frame
     if (!halt_info.kill_render_loop)
         render(data);
+    else
+        halt_info.kill_render_loop = 0;
 }
 
 const static struct wl_callback_listener wl_surface_frame_listener = {
