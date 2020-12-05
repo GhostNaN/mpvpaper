@@ -61,6 +61,7 @@ static char *video_path;
 static struct {
     char **pauselist;
     char **stoplist;
+
     char **argv_copy;
     char *save_info;
 
@@ -226,7 +227,7 @@ static void pthread_usleep(uint time) {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 }
 
-static char *check_halt_list(char **list) {
+static char *check_watch_list(char **list) {
 
     char pid_name[512] = {0};
 
@@ -250,7 +251,7 @@ static void *monitor_pauselist() {
     while (halt_info.pauselist) {
         if (!halt_info.is_paused) {
             char *app;
-            while ((app = check_halt_list(halt_info.pauselist))) {
+            while ((app = check_watch_list(halt_info.pauselist))) {
                 if (app && !is_paused) {
                     if (VERBOSE)
                         cflp_info("Pausing for %s", app);
@@ -274,7 +275,7 @@ static void *monitor_stoplist() {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
     while (halt_info.stoplist) {
-        char *app = check_halt_list(halt_info.stoplist);
+        char *app = check_watch_list(halt_info.stoplist);
         if (app) {
             if (VERBOSE)
                 cflp_info("Stopping for %s", app);
@@ -381,7 +382,7 @@ static void init_threads() {
         id++;
     }
 
-    // Threads for monitoring halt lists
+    // Threads for monitoring watch lists
     if (halt_info.pauselist) {
         pthread_create(&threads[id], NULL, monitor_pauselist, NULL);
         id++;
@@ -720,7 +721,7 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = handle_global_remove,
 };
 
-static char **get_halt_list(char *path_name) {
+static char **get_watch_list(char *path_name) {
 
     FILE *file = fopen(path_name, "r");
     if (file) {
@@ -741,19 +742,19 @@ static char **get_halt_list(char *path_name) {
     return NULL;
 }
 
-static void set_halt_lists() {
+static void set_watch_lists() {
     const char *home_dir = getenv("HOME");
 
     char *pause_path = calloc(strlen(home_dir)+1 + strlen("/.config/mpvpaper/pauselist")+1, sizeof(char));
     strcpy(pause_path, home_dir);
     strcat(pause_path, "/.config/mpvpaper/pauselist");
-    halt_info.pauselist = get_halt_list(pause_path);
+    halt_info.pauselist = get_watch_list(pause_path);
     free(pause_path);
 
     char *stop_path = calloc(strlen(home_dir)+1 + strlen("/.config/mpvpaper/stoplist")+1, sizeof(char));
     strcpy(stop_path, home_dir);
     strcat(stop_path, "/.config/mpvpaper/stoplist");
-    halt_info.stoplist = get_halt_list(stop_path);
+    halt_info.stoplist = get_watch_list(stop_path);
     free(stop_path);
 }
 
@@ -772,6 +773,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
     const char *usage =
         "Usage: mpvpaper [options] <output> <url|path filename>\n"
+        "Example: mpvpaper -o \"no-audio loop\" DP-2 /path/to/video\n"
         "Options:\n"
         "--help         -h    Displays this help message\n"
         "--verbose      -v    Be more verbose\n"
@@ -874,7 +876,7 @@ int main(int argc, char **argv) {
     wl_list_init(&state.outputs);
 
     parse_command_line(argc, argv, &state);
-    set_halt_lists();
+    set_watch_lists();
 
     // Copy argv
     int argv_alloc_size = 0;
