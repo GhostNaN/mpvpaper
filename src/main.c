@@ -82,7 +82,7 @@ static void nop() {}
 
 static void exit_cleanup() {
     // Cancel all threads
-    for(uint i=0; threads[i] != 0; i++) {
+    for(unsigned int i=0; threads[i] != 0; i++) {
         if (pthread_self() != threads[i])
             pthread_cancel(threads[i]);
     }
@@ -184,12 +184,12 @@ static void stop_mpvpaper() {
     sprintf(save_info, "%s %s", time_pos, playlist_pos);
 
     int argv_alloc_size = strlen("-Z")+1 + strlen(save_info)+1;
-    for(uint i=0;  halt_info.argv_copy[i] != NULL; i++) {
+    for(unsigned int i=0;  halt_info.argv_copy[i] != NULL; i++) {
         argv_alloc_size += strlen(halt_info.argv_copy[i])+1;
     }
     char **argv = calloc(argv_alloc_size+1, sizeof(char));
 
-    uint i = 0;
+    unsigned int i = 0;
     for(i=0; halt_info.argv_copy[i] != NULL; i++) {
         argv[i] = strdup(halt_info.argv_copy[i]);
     }
@@ -200,7 +200,7 @@ static void stop_mpvpaper() {
     // Get the "real" cwd
     char exe_dir[1024];
     int cut_point = readlink("/proc/self/exe", exe_dir, sizeof(exe_dir));
-    for(uint i=cut_point; i > 1; i--) {
+    for(unsigned int i=cut_point; i > 1; i--) {
         if (exe_dir[i] == '/') {
             exe_dir[i+1] = '\0';
             break;
@@ -216,12 +216,12 @@ static void stop_mpvpaper() {
 }
 
 // Allow pthread_cancel while sleeping
-static void pthread_sleep(uint time) {
+static void pthread_sleep(unsigned int time) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     sleep(time);
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 }
-static void pthread_usleep(uint time) {
+static void pthread_usleep(unsigned int time) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     usleep(time);
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
@@ -231,7 +231,7 @@ static char *check_watch_list(char **list) {
 
     char pid_name[512] = {0};
 
-    for (uint i=0; list[i] != NULL; i++) {
+    for (unsigned int i=0; list[i] != NULL; i++) {
         strcpy(pid_name, "pidof ");
         strcat(pid_name, list[i]);
         strcat(pid_name, " > /dev/null");
@@ -367,7 +367,7 @@ static void *handle_mpv_events() {
 }
 
 static void init_threads() {
-    uint id = 0;
+    unsigned int id = 0;
 
     pthread_create(&threads[id], NULL, handle_mpv_events, NULL);
     id++;
@@ -509,7 +509,7 @@ static void init_egl(struct display_output *output) {
             {0, 0}
         };
         egl_context = NULL;
-        for (uint i = 0; gl_versions[i].major > 0; i++) {
+        for (unsigned int i = 0; gl_versions[i].major > 0; i++) {
             const EGLint ctx_attrib[] = {
                 EGL_CONTEXT_MAJOR_VERSION, gl_versions[i].major,
                 EGL_CONTEXT_MINOR_VERSION, gl_versions[i].major,
@@ -732,7 +732,7 @@ static char **get_watch_list(char *path_name) {
 
         // Read lines
         char app[512];
-        for (uint i=0; fscanf(file, "%s", app) == 1; i++) {
+        for (unsigned int i=0; fscanf(file, "%s", app) == 1; i++) {
             list[i] = strdup(app);
         }
 

@@ -54,7 +54,7 @@ static void revive_mpvpaper() {
     // Get the "real" cwd
     char exe_dir[1024];
     int cut_point = readlink("/proc/self/exe", exe_dir, sizeof(exe_dir));
-    for(uint i=cut_point; i > 1; i--) {
+    for(unsigned int i=cut_point; i > 1; i--) {
         if (exe_dir[i] == '/') {
             exe_dir[i+1] = '\0';
             break;
@@ -65,7 +65,7 @@ static void revive_mpvpaper() {
 }
 
 static void check_stoplist() {
-    for (uint i=0; halt_info.stoplist[i] != NULL; i++) {
+    for (unsigned int i=0; halt_info.stoplist[i] != NULL; i++) {
         char pid_name[512] = {0};
         strcpy(pid_name, "pidof ");
         strcat(pid_name, halt_info.stoplist[i]);
@@ -290,7 +290,7 @@ static void set_stop_list() {
 
         // Read lines
         char app[512];
-        for (uint i=0; fscanf(file, "%s", app) == 1; i++) {
+        for (unsigned int i=0; fscanf(file, "%s", app) == 1; i++) {
             halt_info.stoplist[i] = strdup(app);
         }
 
