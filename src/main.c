@@ -21,6 +21,7 @@
 
 #include <cflogprinter.h>
 
+typedef unsigned int uint;
 
 struct wl_state {
     struct wl_display *display;

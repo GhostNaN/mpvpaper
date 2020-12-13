@@ -12,6 +12,8 @@
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 
+typedef unsigned int uint;
+
 struct wl_state {
     struct wl_display *display;
     struct wl_compositor *compositor;
