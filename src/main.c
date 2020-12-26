@@ -394,19 +394,7 @@ static void init_threads() {
     }
 }
 
-static void *get_proc_address_mpv(void *ctx, const char *name){
-    (void) ctx;
-    return eglGetProcAddress(name);
-}
-
-static void init_mpv(struct display_output *output) {
-
-    mpv = mpv_create();
-    if (!mpv) {
-        cflp_error("Failed creating mpv context");
-        exit_mpvpaper(1);
-    }
-
+static void set_init_mpv_options() {
     // Enable user control through terminal by default
     mpv_set_option_string(mpv, "input-default-bindings", "yes");
     mpv_set_option_string(mpv, "input-terminal", "yes");
@@ -436,11 +424,35 @@ static void init_mpv(struct display_output *output) {
     // Set mpv_options passed
     mpv_load_config_file(mpv, "/tmp/mpvpaper.conf");
     remove("/tmp/mpvpaper.conf");
+}
+
+static void *get_proc_address_mpv(void *ctx, const char *name){
+    (void) ctx;
+    return eglGetProcAddress(name);
+}
+
+static void init_mpv(struct display_output *output) {
+
+    mpv = mpv_create();
+    if (!mpv) {
+        cflp_error("Failed creating mpv context");
+        exit_mpvpaper(1);
+    }
+
+    set_init_mpv_options();
 
     if (mpv_initialize(mpv) < 0) {
         cflp_error("mpv init failed");
         exit_mpvpaper(1);
     }
+
+    // Force libmpv vo as nothing else will work
+    char *vo_option = mpv_get_property_string(mpv, "options/vo");
+    if (strcmp(vo_option, "libmpv") != 0 && strcmp(vo_option, "") != 0) {
+        cflp_warning("mpvpaper does not support any other vo than \"libmpv\"");
+        mpv_set_option_string(mpv, "vo", "libmpv");
+    }
+
     // Have mpv render onto egl context
     mpv_render_param params[] = {
         {MPV_RENDER_PARAM_WL_DISPLAY, output->state->display},
