@@ -77,6 +77,7 @@ static struct {
 
 static pthread_t threads[5];
 
+static uint AUTO_NEXT_TIME = 0;
 static bool VERBOSE = 0;
 
 static void nop() {}
@@ -342,8 +343,16 @@ static void *handle_auto_stop() {
 static void *handle_mpv_events() {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
     bool mpv_paused = 0;
+    time_t start_time = time(NULL);
 
     while (!halt_info.kill_render_loop) {
+        if (AUTO_NEXT_TIME) {
+            if ((time(NULL) - start_time) >= AUTO_NEXT_TIME) {
+                mpv_command_async(mpv, 0, (const char*[]) {"playlist-next", NULL});
+                start_time = time(NULL);
+            }
+        }
+
         mpv_event* event = mpv_wait_event(mpv, 0);
         if (event->event_id == MPV_EVENT_SHUTDOWN || event->event_id == MPV_EVENT_IDLE)
             exit_mpvpaper(0);
@@ -779,6 +788,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         {"fork", no_argument, NULL, 'f'},
         {"auto-pause", no_argument, NULL, 'p'},
         {"auto-stop", no_argument, NULL, 's'},
+        {"auto-next", required_argument, NULL, 'n'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
         {0, 0, 0, 0}
@@ -786,17 +796,18 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
     const char *usage =
         "Usage: mpvpaper [options] <output> <url|path filename>\n"
-        "Example: mpvpaper -o \"no-audio loop\" DP-2 /path/to/video\n"
+        "Example: mpvpaper -vs -o \"no-audio loop\" DP-2 /path/to/video\n"
         "Options:\n"
-        "--help         -h    Displays this help message\n"
-        "--verbose      -v    Be more verbose\n"
-        "--fork         -f    Forks mpvpaper so you can close the terminal\n"
-        "--auto-pause   -p    Automagically pause mpv when the wallpaper is hidden\n"
-        "                     This saves CPU usage, more or less, seamlessly\n"
-        "--auto-stop    -s    Automagically stop mpv when the wallpaper is hidden\n"
-        "                     This saves CPU/RAM usage, although more abruptly\n"
-        "--layer        -l    Specifies shell surface layer to run on (background by default)\n"
-        "--mpv-options  -o    Forwards mpv options (Must be within quotes\"\")\n";
+        "--help         -h              Displays this help message\n"
+        "--verbose      -v              Be more verbose\n"
+        "--fork         -f              Forks mpvpaper so you can close the terminal\n"
+        "--auto-pause   -p              Automagically pause mpv when the wallpaper is hidden\n"
+        "                               This saves CPU usage, more or less, seamlessly\n"
+        "--auto-stop    -s              Automagically stop mpv when the wallpaper is hidden\n"
+        "                               This saves CPU/RAM usage, although more abruptly\n"
+        "--auto-next    -n SECS         Play the next video in a playlist every ? seconds\n"
+        "--layer        -l LAYER        Specifies shell surface layer to run on (background by default)\n"
+        "--mpv-options  -o \"OPTIONS\"    Forwards mpv options (Must be within quotes\"\")\n";
 
 
     if(argc > 2) {
@@ -804,7 +815,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         char *mpv_options;
 
         char opt;
-        while((opt = getopt_long(argc, argv, "hvfpsl:o:Z:", long_options, NULL)) != -1) {
+        while((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
 
             switch (opt) {
             case 'h':
@@ -828,6 +839,12 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
             case 's':
                 halt_info.auto_stop = 1;
                 halt_info.auto_pause = 0;
+                break;
+            case 'n':
+                AUTO_NEXT_TIME = atoi(optarg);
+                if (AUTO_NEXT_TIME == 0) 
+                    cflp_warning("0 or invaild time set for auto-next\n"
+                                 "Please use a postitive integer");
                 break;
             case 'l':
                 layer_name = strdup(optarg);

@@ -309,6 +309,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         {"fork", no_argument, NULL, 'f'},
         {"auto-pause", no_argument, NULL, 'p'},
         {"auto-stop", no_argument, NULL, 's'},
+        {"auto-next", required_argument, NULL, 'n'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
         {0, 0, 0, 0}
@@ -316,18 +317,18 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
     const char *usage =
         "Usage: mpvpaper-holder <mpvpaper options>\n"
-        "Descrition:\n"
+        "Description:\n"
         "mpvpaper-holder acts as a lean gate keeper before mpvpaper can run\n"
         "\n"
         "It's sole purpose is to check if there is:\n"
-        "Any program is that running from the stoplist file\n"
+        "Any program that is running from the stoplist file\n"
         "- Set in \"~/.config/mpvpaper/stoplist\"\n"
-        "If the wallpaper needs to be seen when drawn\n"
+        "And if the wallpaper needs to be seen when drawn\n"
         "- Set with \"-s\" or \"--auto-stop\" mpvpaper option\n";
 
     if(argc > 2) {
         char opt;
-        while((opt = getopt_long(argc, argv, "hvfpsl:o:Z:", long_options, NULL)) != -1) {
+        while((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
 
             switch (opt) {
                 case 'h':
