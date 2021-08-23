@@ -77,7 +77,7 @@ static struct {
 
 static pthread_t threads[5];
 
-static uint AUTO_NEXT_TIME = 0;
+static uint SLIDESHOW_TIME = 0;
 static bool VERBOSE = 0;
 
 static void nop() {}
@@ -346,8 +346,8 @@ static void *handle_mpv_events() {
     time_t start_time = time(NULL);
 
     while (!halt_info.kill_render_loop) {
-        if (AUTO_NEXT_TIME) {
-            if ((time(NULL) - start_time) >= AUTO_NEXT_TIME) {
+        if (SLIDESHOW_TIME) {
+            if ((time(NULL) - start_time) >= SLIDESHOW_TIME) {
                 mpv_command_async(mpv, 0, (const char*[]) {"playlist-next", NULL});
                 start_time = time(NULL);
             }
@@ -429,6 +429,12 @@ static void set_init_mpv_options() {
 
     if (VERBOSE && strcmp(loaded_configs, ""))
         cflp_info("Loaded [ %s] user configs from \"~/.config/mpv/\"", loaded_configs);
+
+    // Convenience options passed for slideshow mode
+    if (SLIDESHOW_TIME != 0) {
+        mpv_set_option_string(mpv, "loop", "yes");
+        mpv_set_option_string(mpv, "loop-playlist", "yes");
+    }
 
     // Set mpv_options passed
     mpv_load_config_file(mpv, "/tmp/mpvpaper.conf");
@@ -788,7 +794,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         {"fork", no_argument, NULL, 'f'},
         {"auto-pause", no_argument, NULL, 'p'},
         {"auto-stop", no_argument, NULL, 's'},
-        {"auto-next", required_argument, NULL, 'n'},
+        {"slideshow", required_argument, NULL, 'n'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
         {0, 0, 0, 0}
@@ -805,7 +811,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "                               This saves CPU usage, more or less, seamlessly\n"
         "--auto-stop    -s              Automagically stop mpv when the wallpaper is hidden\n"
         "                               This saves CPU/RAM usage, although more abruptly\n"
-        "--auto-next    -n SECS         Play the next video in a playlist every ? seconds\n"
+        "--slideshow    -n SECS         Slideshow mode plays the next video in a playlist every ? seconds\n"
+        "                               And passes mpv options \"loop loop-playlist\" for convenience\n"
         "--layer        -l LAYER        Specifies shell surface layer to run on (background by default)\n"
         "--mpv-options  -o \"OPTIONS\"    Forwards mpv options (Must be within quotes\"\")\n";
 
@@ -841,10 +848,10 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 halt_info.auto_pause = 0;
                 break;
             case 'n':
-                AUTO_NEXT_TIME = atoi(optarg);
-                if (AUTO_NEXT_TIME == 0) 
-                    cflp_warning("0 or invaild time set for auto-next\n"
-                                 "Please use a postitive integer");
+                SLIDESHOW_TIME = atoi(optarg);
+                if (SLIDESHOW_TIME == 0) 
+                    cflp_warning("0 or invalid time set for slideshow\n"
+                                 "Please use a positive integer");
                 break;
             case 'l':
                 layer_name = strdup(optarg);
