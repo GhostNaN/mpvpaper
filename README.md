@@ -20,7 +20,7 @@ git clone --single-branch https://github.com/GhostNaN/mpvpaper
 Build:
 ```
 cd mpvpaper
-meson build --prefix=/usr
+meson build --prefix=/usr/local
 ninja -C build
 ```
 Install:
