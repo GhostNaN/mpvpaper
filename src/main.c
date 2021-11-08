@@ -811,14 +811,16 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "--help         -h              Displays this help message\n"
         "--verbose      -v              Be more verbose\n"
         "--fork         -f              Forks mpvpaper so you can close the terminal\n"
-        "--auto-pause   -p              Automagically pause mpv when the wallpaper is hidden\n"
+        "--auto-pause   -p              Automagically* pause mpv when the wallpaper is hidden\n"
         "                               This saves CPU usage, more or less, seamlessly\n"
-        "--auto-stop    -s              Automagically stop mpv when the wallpaper is hidden\n"
+        "--auto-stop    -s              Automagically* stop mpv when the wallpaper is hidden\n"
         "                               This saves CPU/RAM usage, although more abruptly\n"
         "--slideshow    -n SECS         Slideshow mode plays the next video in a playlist every ? seconds\n"
         "                               And passes mpv options \"loop loop-playlist\" for convenience\n"
         "--layer        -l LAYER        Specifies shell surface layer to run on (background by default)\n"
         "--mpv-options  -o \"OPTIONS\"    Forwards mpv options (Must be within quotes\"\")\n"
+        "\n"
+        "* See man page for more details\n"
         ;
 
     if(argc > 2) {

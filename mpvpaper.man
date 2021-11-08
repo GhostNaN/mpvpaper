@@ -1,0 +1,149 @@
+.TH MPVPAPER 1 "November 2021" "mpvpaper 1.2" "User Manual"
+.SH NAME
+mpvpaper \- video wallpaper player using mpv for wlroots
+.SH SYNOPSIS
+mpvpaper [options] <output> <url|path filename>
+
+.SH DESCRIPTION
+.P
+\fBmpvpaper\fR is a wallpaper program for wlroots based Wayland compositors, such as Sway. 
+ That allows you to play videos with \fBmpv\fR as your wallpaper.
+
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Displays usage options
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+Be more verbose
+.TP
+\fB\-f\fR, \fB\-\-fork\fR
+Forks mpvpaper so you can close the terminal
+.TP
+\fB\-p\fR, \fB\-\-auto-pause\fR
+Automagically pause mpv when the wallpaper is hidden*
+
+This saves CPU usage, more or less, seamlessly
+.TP
+\fB\-s\fR, \fB\-\-auto-stop\fR
+Automagically stop mpv when the wallpaper is hidden*
+
+This saves CPU/RAM usage, although more abruptly
+.TP
+\fB\-n\fR, \fB\-\-slideshow\fR <seconds>
+Slideshow mode plays the next video in a playlist every \fI\<seconds>\fR
+
+And passes mpv options "loop loop-playlist" for convenience
+.TP
+\fB\-l\fR, \fB\-\-layer\fR <layer>
+Specifies shell surface \fI\<layer>\fR to run on (background by default)
+.TP
+\fB\-o\fR, \fB\-\-mpv-options\fR <"options">
+Forwards mpv \fI\<"options">\fR
+
+Must be within quotes if multiple options are passed
+
+.SH EXAMPLES
+Simple example:
+.RS
+mpvpaper DP-2 /path/to/video
+.RE
+
+Forward mpv options by passing "--mpv-options" or "-o" like so:
+.RS
+mpvpaper -o "no-audio --loop-playlist shuffle" HDMI-A-1 www.url/to/playlist
+.RE
+
+You can also control mpvpaper just like \fBmpv\fR in the terminal with keyboard bindings. But if you
+ would like to control mpvpaper while it's forked, you could use a mpv input-ipc-server like this:
+.RS
+mpvpaper -o "input-ipc-server=/tmp/mpv-socket-DP-1" DP-1 /path/to/video
+.RE
+
+Then input commands with \fBsocat\fR. For example, toggle pause:
+.RS
+echo 'cycle pause' | socat - /tmp/mpv-socket-DP-1
+.RE
+
+For more commands read: 
+.UR https://mpv.io/manual/master/#command-interface
+.UE
+
+.SH FILES
+
+These files(watch lists) contain lists of program names that, if found running with \fBpidof\fR, 
+ will cause mpvpaper to pause/stop and must be created manually**
+
+.RS
+.I ~/.config/mpvpaper/pauselist
+.RS
+List of program names that will cause mpvpaper to pause
+.RE
+
+.I ~/.config/mpvpaper/stoplist
+.RS
+List of program names that will cause mpvpaper to stop
+.RE .RE
+
+Add programs that can be found with the \fBpidof\fR command into the list and separate by spaces or newlines,
+ for example: "firefox steam obs" or:
+.RS
+ "firefox 
+  steam 
+  obs"
+.RE
+
+.SH NOTES
+
+*Limitations of automagic:
+.RS
+.P
+mpvpaper manipulates a feature of Wayland called a "surface frame callback"
+.P
+This feature of Wayland allows mpvpaper to draw/render only when it makes sense to do so.
+ And one reason mpvpaper might not draw/render is if it's "hidden".
+ This is the magic behind the automagic pause/stop options.
+.P
+Whatever "hidden" means is up to compositor. As for Sway, "hidden" is if there is a fullscreen window
+ in the way of the wallpaper. mpvpaper will still draw/render even if there is a normal window 
+ blocking the wallpaper view entirely.
+.RE
+
+**More on lists:
+.RS
+\(bu mpvpaper will automatically resume only after all the programs
+in the watch lists are no longer running
+
+\(bu If there are programs running from both lists, stopping will always win out
+
+\(bu Programs added into a list at runtime will be ignored, unless restarted or "stopped"
+.RE
+
+Extra notes:
+.RS
+\(bu When mpvpaper is resuming after "stopping", mpvpaper should begin where it left off
+    Both in terms of time position and playlist position(if not shuffled)
+    
+\(bu There is a small time delay(1-2 secs.) with the automagic options
+    as it uses time to calculate when to act
+    
+\(bu mpv user configs are loaded from 
+.I ~/.config/mpv/
+
+.RE
+
+
+.SH AUTHOR
+Created by GhostNaN 
+
+.SM Inspired by scoopta's \fBglpaper\fR
+
+Code Repository:
+.UR https://github.com/GhostNaN/mpvpaper/ 
+.UE
+
+.SH SEE ALSO
+
+mpv (1)
+
+
