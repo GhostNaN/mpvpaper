@@ -58,6 +58,7 @@ static EGLSurface *egl_surface;
 static mpv_handle *mpv;
 static mpv_render_context *mpv_glcontext;
 static char *video_path;
+static char *opt_config_path;
 
 static struct {
     char **pauselist;
@@ -437,8 +438,9 @@ static void set_init_mpv_options() {
     }
 
     // Set mpv_options passed
-    mpv_load_config_file(mpv, "/tmp/mpvpaper.conf");
-    remove("/tmp/mpvpaper.conf");
+    mpv_load_config_file(mpv, opt_config_path);
+    remove(opt_config_path);
+
 }
 
 static void *get_proc_address_mpv(void *ctx, const char *name){
@@ -530,7 +532,7 @@ static void init_egl(struct display_output *output) {
     eglChooseConfig(egl_display, win_attrib, &config, 1, &config_len);
 
     if (!egl_context) {
-        // Check for OpenGL combatiblity for creating egl context
+        // Check for OpenGL compatibility for creating egl context
         static const struct { int major, minor; } gl_versions[] = {
             {4, 6}, {4, 5}, {4, 4}, {4, 3}, {4, 2}, {4, 1}, {4, 0},
             {3, 3}, {3, 2}, {3, 1}, {3, 0},
@@ -802,7 +804,9 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
     const char *usage =
         "Usage: mpvpaper [options] <output> <url|path filename>\n"
+        "\n"
         "Example: mpvpaper -vs -o \"no-audio loop\" DP-2 /path/to/video\n"
+        "\n"
         "Options:\n"
         "--help         -h              Displays this help message\n"
         "--verbose      -v              Be more verbose\n"
@@ -814,12 +818,12 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "--slideshow    -n SECS         Slideshow mode plays the next video in a playlist every ? seconds\n"
         "                               And passes mpv options \"loop loop-playlist\" for convenience\n"
         "--layer        -l LAYER        Specifies shell surface layer to run on (background by default)\n"
-        "--mpv-options  -o \"OPTIONS\"    Forwards mpv options (Must be within quotes\"\")\n";
-
+        "--mpv-options  -o \"OPTIONS\"    Forwards mpv options (Must be within quotes\"\")\n"
+        ;
 
     if(argc > 2) {
         char *layer_name;
-        char *mpv_options;
+        char *mpv_options = NULL;
 
         char opt;
         while((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
@@ -873,14 +877,6 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 break;
             case 'o':
                 mpv_options = strdup(optarg);
-                // Forward to a tmp file so mpv can parse options
-                for (int i = 0; i < (int)strlen(mpv_options); i++) {
-                    if (mpv_options[i] == ' ')
-                        mpv_options[i] = '\n';
-                }
-                FILE* file = fopen("/tmp/mpvpaper.conf", "w");
-                fputs(mpv_options, file);
-                fclose(file);
                 break;
 
             case 'Z': // Hidden option to recover video pos after stopping
@@ -893,14 +889,31 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
             exit(EXIT_FAILURE);
         }
         state->monitor = strdup(argv[optind]);
-
         video_path = strdup(argv[optind+1]);
+
+        // Forward options to a tmp file so mpv can parse options
+        if(mpv_options) {
+            for (int i = 0; i < (int)strlen(mpv_options); i++) {
+                if (mpv_options[i] == ' ')
+                    mpv_options[i] = '\n';
+            }
+            // Create config file name
+            opt_config_path = calloc(strlen("/tmp/mpvpaper.config")+1 + strlen(state->monitor)+1, sizeof(char));
+            strcpy(opt_config_path, "/tmp/mpvpaper");
+            strcat(opt_config_path, state->monitor);
+            strcat(opt_config_path, ".config");
+            // Put options into config file
+            FILE* file = fopen(opt_config_path, "w");
+            fputs(mpv_options, file);
+            fclose(file);
+        }
 
         if(!system("pidof swaybg > /dev/null")) {
             cflp_warning("swaybg is running. This may block mpvpaper from being seen.");
         }
     }
     else {
+        cflp_error("Not enough args passed");
         fprintf(stderr, "%s", usage);
         exit(EXIT_FAILURE);
     }
