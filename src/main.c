@@ -23,6 +23,9 @@
 
 typedef unsigned int uint;
 
+#define MPV_OBSERVE_IDLE 1
+#define MPV_OBSERVE_PAUSE 2
+
 struct wl_state {
     struct wl_display *display;
     struct wl_compositor *compositor;
@@ -346,6 +349,15 @@ static void *handle_mpv_events() {
     bool mpv_paused = 0;
     time_t start_time = time(NULL);
 
+    /**
+     * Register observers as MPV_EVENT_IDLE is deprecated and
+     * MPV_EVENT_PAUSE/MPV_EVENT_UNPAUSE have been removed.
+     *
+     * @see https://github.com/mpv-player/mpv/pull/9541
+     */
+    mpv_observe_property(mpv, MPV_OBSERVE_IDLE, "idle-active", MPV_FORMAT_NONE);
+    mpv_observe_property(mpv, MPV_OBSERVE_PAUSE, "pause", MPV_FORMAT_FLAG);
+
     while (!halt_info.kill_render_loop) {
         if (SLIDESHOW_TIME) {
             if ((time(NULL) - start_time) >= SLIDESHOW_TIME) {
@@ -355,25 +367,44 @@ static void *handle_mpv_events() {
         }
 
         mpv_event* event = mpv_wait_event(mpv, 0);
-        if (event->event_id == MPV_EVENT_SHUTDOWN || event->event_id == MPV_EVENT_IDLE)
-            exit_mpvpaper(0);
-        else if (event->event_id == MPV_EVENT_PAUSE) {
-            mpv_paused = 1;
-            // User paused
-            if (!halt_info.is_paused)
-                halt_info.is_paused += 1;
-        }
-        else if (event->event_id == MPV_EVENT_UNPAUSE) {
-            mpv_paused = 0;
-            halt_info.is_paused = 0;
-        }
 
-        if (!halt_info.is_paused && mpv_paused) {
-            mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "no", NULL});
+        if (event->event_id == MPV_EVENT_SHUTDOWN)
+            exit_mpvpaper(0);
+        else if (event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
+            switch (event->reply_userdata) {
+                case MPV_OBSERVE_IDLE: {
+                    exit_mpvpaper(0);
+                    break;
+                }
+                case MPV_OBSERVE_PAUSE: {
+                    if (mpv_get_property(mpv, "paused", MPV_FORMAT_FLAG, &mpv_paused) < 0) {
+                        break;
+                    }
+                    if (mpv_paused) {
+                        // User paused
+                        if (!halt_info.is_paused)
+                            halt_info.is_paused += 1;
+                    } else {
+                        halt_info.is_paused = 0;
+                    }
+
+                    if (!halt_info.is_paused && mpv_paused) {
+                        mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "no", NULL});
+                    }
+
+                    break;
+                }
+                default:
+                    break;
+            }
         }
 
         pthread_usleep(10000);
     }
+
+    mpv_unobserve_property(mpv, MPV_OBSERVE_IDLE);
+    mpv_unobserve_property(mpv, MPV_OBSERVE_PAUSE);
+
     pthread_exit(NULL);
 }
 
