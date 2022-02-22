@@ -76,7 +76,7 @@ static struct {
 
 } halt_info = {NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0};
 
-static pthread_t threads[5];
+static pthread_t threads[5] = {0};
 
 static uint SLIDESHOW_TIME = 0;
 static bool VERBOSE = 0;
@@ -88,12 +88,6 @@ static void exit_cleanup() {
     for(uint i=0; threads[i] != 0; i++) {
         if (pthread_self() != threads[i])
             pthread_cancel(threads[i]);
-    }
-
-    // Give mpv a chance to finish
-    halt_info.kill_render_loop = 1;
-    for (int trys=10; halt_info.kill_render_loop && trys > 0; trys--) {
-        usleep(10000);
     }
 
     if (mpv_glcontext)
@@ -162,6 +156,10 @@ static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t
         while (halt_info.is_paused) {
             if (time(NULL) - start_time >= 1)
                 break;
+            if (halt_info.kill_render_loop) {
+                halt_info.kill_render_loop = 0;
+                exit_mpvpaper(0);
+            }
             usleep(1000);
         }
     }
@@ -169,8 +167,10 @@ static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t
     // Render next frame
     if (!halt_info.kill_render_loop)
         render(data);
-    else
+    else {
         halt_info.kill_render_loop = 0;
+        exit_mpvpaper(0);
+    }
 }
 
 const static struct wl_callback_listener wl_surface_frame_listener = {
@@ -266,7 +266,8 @@ static void *monitor_pauselist() {
             }
             if (is_paused) {
                 is_paused = 0;
-                halt_info.is_paused -= 1;
+                if (halt_info.is_paused)
+                    halt_info.is_paused -= 1;
             }
         }
         pthread_sleep(1);
@@ -311,7 +312,8 @@ static void *handle_auto_pause() {
             }
             if (is_paused) {
                 is_paused = 0;
-                halt_info.is_paused -= 1;
+                if (halt_info.is_paused)
+                    halt_info.is_paused -= 1;
             }
         }
         pthread_sleep(1);
@@ -346,6 +348,9 @@ static void *handle_mpv_events() {
     bool mpv_paused = 0;
     time_t start_time = time(NULL);
 
+    const int MPV_OBSERVE_PAUSE = 1;
+    mpv_observe_property(mpv, MPV_OBSERVE_PAUSE, "pause", MPV_FORMAT_FLAG);
+
     while (!halt_info.kill_render_loop) {
         if (SLIDESHOW_TIME) {
             if ((time(NULL) - start_time) >= SLIDESHOW_TIME) {
@@ -355,17 +360,31 @@ static void *handle_mpv_events() {
         }
 
         mpv_event* event = mpv_wait_event(mpv, 0);
-        if (event->event_id == MPV_EVENT_SHUTDOWN || event->event_id == MPV_EVENT_IDLE)
-            exit_mpvpaper(0);
-        else if (event->event_id == MPV_EVENT_PAUSE) {
-            mpv_paused = 1;
-            // User paused
-            if (!halt_info.is_paused)
-                halt_info.is_paused += 1;
+
+        if (event->event_id == MPV_EVENT_SHUTDOWN) {
+            // Give mpv a chance to finish
+            halt_info.kill_render_loop = 1;
+            for (int trys=10; halt_info.kill_render_loop && trys > 0; trys--) {
+                usleep(10000);
+            }
+            // render loop didn't kill itself, this may cause crashing
+            if (halt_info.kill_render_loop) {
+                if (VERBOSE)
+                    cflp_warning("Failed to quit mpv");
+                exit_mpvpaper(0);
+            }
         }
-        else if (event->event_id == MPV_EVENT_UNPAUSE) {
-            mpv_paused = 0;
-            halt_info.is_paused = 0;
+        else if (event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
+            if (event->reply_userdata == MPV_OBSERVE_PAUSE) {
+                mpv_get_property(mpv, "pause", MPV_FORMAT_FLAG, &mpv_paused);
+                if (mpv_paused) {
+                    // User paused
+                    if (!halt_info.is_paused)
+                        halt_info.is_paused += 1;
+                } else {
+                    halt_info.is_paused = 0;
+                }
+            }
         }
 
         if (!halt_info.is_paused && mpv_paused) {
@@ -374,6 +393,9 @@ static void *handle_mpv_events() {
 
         pthread_usleep(10000);
     }
+
+    mpv_unobserve_property(mpv, MPV_OBSERVE_PAUSE);
+
     pthread_exit(NULL);
 }
 
@@ -458,8 +480,9 @@ static void init_mpv(struct display_output *output) {
 
     set_init_mpv_options();
 
-    if (mpv_initialize(mpv) < 0) {
-        cflp_error("mpv init failed");
+    int err = mpv_initialize(mpv);
+    if (err < 0) {
+        cflp_error("Failed to init mpv, %s", mpv_error_string(err));
         exit_mpvpaper(1);
     }
 
@@ -491,12 +514,12 @@ static void init_mpv(struct display_output *output) {
         // Save default start pos
         default_start = mpv_get_property_string(mpv, "start");
         // Restore video position
-        mpv_command_async(mpv, 0, (const char*[]) {"set", "start", time_pos, NULL});
+        mpv_command(mpv, (const char*[]) {"set", "start", time_pos, NULL});
         // Recover playlist pos, that is if it's not shuffled...
-        mpv_command_async(mpv, 0, (const char*[]) {"set", "playlist-start", playlist_pos, NULL});
+        mpv_command(mpv, (const char*[]) {"set", "playlist-start", playlist_pos, NULL});
     }
 
-    mpv_command_async(mpv, 0, (const char*[]) {"loadfile", video_path, NULL});
+    mpv_command(mpv, (const char*[]) {"loadfile", video_path, NULL});
 
     mpv_event* event = mpv_wait_event(mpv, 1);
     while (event->event_id != MPV_EVENT_FILE_LOADED){
@@ -507,7 +530,10 @@ static void init_mpv(struct display_output *output) {
 
     // Return start pos to default
     if (default_start)
-        mpv_command_async(mpv, 0, (const char*[]) {"set", "start", default_start, NULL});
+        mpv_command(mpv, (const char*[]) {"set", "start", default_start, NULL});
+
+    // mpv must never idle
+    mpv_command(mpv, (const char*[]) {"set", "idle", "no", NULL});
 }
 
 static void init_egl(struct display_output *output) {
@@ -548,7 +574,7 @@ static void init_egl(struct display_output *output) {
             egl_context = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, ctx_attrib);
             if (egl_context) {
                 if (VERBOSE) {
-                    cflp_info("OpenGL %i.%i EGL context loaded", gl_versions[i].major, gl_versions[i].minor);
+                    cflp_info("OpenGL %i.%i EGL context created", gl_versions[i].major, gl_versions[i].minor);
                 }
                 break;
             }
@@ -563,7 +589,10 @@ static void init_egl(struct display_output *output) {
     eglMakeCurrent(egl_display, egl_surface, egl_surface, egl_context);
     eglSwapInterval(egl_display, 0);
 
-    gladLoadGLLoader((GLADloadproc) eglGetProcAddress);
+    if(!gladLoadGLLoader((GLADloadproc) eglGetProcAddress)) {
+        cflp_error("Failed to load OpenGL");
+        exit_mpvpaper(1);
+    }
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glViewport(0, 0, output->width, output->height);
@@ -767,7 +796,9 @@ static char **get_watch_list(char *path_name) {
         }
 
         fclose(file);
-        return list;
+        // If any app found
+        if (list[0])
+            return list;
     }
     return NULL;
 }
@@ -923,6 +954,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
 int main(int argc, char **argv) {
     signal(SIGINT, handle_signal);
+    signal(SIGQUIT, handle_signal);
+    signal(SIGTERM, handle_signal);
 
     struct wl_state state = {0};
     wl_list_init(&state.outputs);
