@@ -367,12 +367,14 @@ static void *handle_mpv_events() {
             for (int trys=10; halt_info.kill_render_loop && trys > 0; trys--) {
                 usleep(10000);
             }
+
             // render loop didn't kill itself, this may cause crashing
             if (halt_info.kill_render_loop) {
                 if (VERBOSE)
                     cflp_warning("Failed to quit mpv");
                 exit_mpvpaper(0);
             }
+            break;
         }
         else if (event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
             if (event->reply_userdata == MPV_OBSERVE_PAUSE) {

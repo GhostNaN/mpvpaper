@@ -1,4 +1,4 @@
-.TH MPVPAPER 1 "November 2021" "mpvpaper 1.2" "User Manual"
+.TH MPVPAPER 1 "February 2022" "mpvpaper 1.2.1" "User Manual"
 .SH NAME
 mpvpaper \- video wallpaper player using mpv for wlroots
 .SH SYNOPSIS
@@ -150,5 +150,3 @@ Code Repository:
 .SH SEE ALSO
 
 mpv (1)
-
-
