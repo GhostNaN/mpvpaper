@@ -345,7 +345,7 @@ static void *handle_auto_stop() {
 
 static void *handle_mpv_events() {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
-    bool mpv_paused = 0;
+    int mpv_paused = 0;
     time_t start_time = time(NULL);
 
     const int MPV_OBSERVE_PAUSE = 1;
