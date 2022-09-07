@@ -58,7 +58,7 @@ static EGLSurface *egl_surface;
 static mpv_handle *mpv;
 static mpv_render_context *mpv_glcontext;
 static char *video_path;
-static char *opt_config_path;
+static char *mpv_options;
 
 static struct {
     char **pauselist;
@@ -428,7 +428,7 @@ static void init_threads() {
     }
 }
 
-static void set_init_mpv_options() {
+static void set_init_mpv_options(const struct wl_state *state) {
     // Enable user control through terminal by default
     mpv_set_option_string(mpv, "input-default-bindings", "yes");
     mpv_set_option_string(mpv, "input-terminal", "yes");
@@ -462,9 +462,21 @@ static void set_init_mpv_options() {
     }
 
     // Set mpv_options passed
-    mpv_load_config_file(mpv, opt_config_path);
-    remove(opt_config_path);
+    if (mpv_options) {
+        // Create config file name
+        char *opt_config_path = calloc(strlen("/tmp/mpvpaper.config")+1 + strlen(state->monitor)+1, sizeof(char));
+        strcpy(opt_config_path, "/tmp/mpvpaper");
+        strcat(opt_config_path, state->monitor);
+        strcat(opt_config_path, ".config");
+        // Put options into config file
+        FILE *file = fopen(opt_config_path, "w");
+        fputs(mpv_options, file);
+        fclose(file);
 
+        mpv_load_config_file(mpv, opt_config_path);
+        remove(opt_config_path);
+        free(opt_config_path);
+    }
 }
 
 static void *get_proc_address_mpv(void *ctx, const char *name){
@@ -480,7 +492,7 @@ static void init_mpv(struct display_output *output) {
         exit_mpvpaper(1);
     }
 
-    set_init_mpv_options();
+    set_init_mpv_options(output->state);
 
     int err = mpv_initialize(mpv);
     if (err < 0) {
@@ -858,7 +870,6 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
     if(argc > 2) {
         char *layer_name;
-        char *mpv_options = NULL;
 
         char opt;
         while((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
@@ -911,7 +922,13 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 }
                 break;
             case 'o':
+                free(mpv_options);
                 mpv_options = strdup(optarg);
+                /* replace spaces with newlines */
+                for (int i = 0; i < (int)strlen(mpv_options); i++) {
+                    if (mpv_options[i] == ' ')
+                        mpv_options[i] = '\n';
+                }
                 break;
 
             case 'Z': // Hidden option to recover video pos after stopping
@@ -925,23 +942,6 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         }
         state->monitor = strdup(argv[optind]);
         video_path = strdup(argv[optind+1]);
-
-        // Forward options to a tmp file so mpv can parse options
-        if(mpv_options) {
-            for (int i = 0; i < (int)strlen(mpv_options); i++) {
-                if (mpv_options[i] == ' ')
-                    mpv_options[i] = '\n';
-            }
-            // Create config file name
-            opt_config_path = calloc(strlen("/tmp/mpvpaper.config")+1 + strlen(state->monitor)+1, sizeof(char));
-            strcpy(opt_config_path, "/tmp/mpvpaper");
-            strcat(opt_config_path, state->monitor);
-            strcat(opt_config_path, ".config");
-            // Put options into config file
-            FILE* file = fopen(opt_config_path, "w");
-            fputs(mpv_options, file);
-            fclose(file);
-        }
 
         if(!system("pidof swaybg > /dev/null")) {
             cflp_warning("swaybg is running. This may block mpvpaper from being seen.");
