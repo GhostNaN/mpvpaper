@@ -46,6 +46,7 @@ struct display_output {
     struct zwlr_layer_surface_v1 *layer_surface;
 
     uint32_t width, height;
+    uint32_t scale;
 
     struct wl_list link;
 };
@@ -125,8 +126,8 @@ static void render(struct display_output *output) {
     mpv_render_param render_params[] = {
         {MPV_RENDER_PARAM_OPENGL_FBO, &(mpv_opengl_fbo){
             .fbo = 0,
-            .w = output->width,
-            .h = output->height,
+            .w = output->width * output->scale,
+            .h = output->height  * output->scale,
         }},
         // Flip rendering (needed due to flipped GL coordinate system).
         {MPV_RENDER_PARAM_FLIP_Y, &(int){1}},
@@ -552,7 +553,8 @@ static void init_mpv(struct display_output *output) {
 
 static void init_egl(struct display_output *output) {
 
-    egl_window = wl_egl_window_create(output->surface, output->width, output->height);
+    wl_surface_set_buffer_scale(output->surface, output->scale);
+    egl_window = wl_egl_window_create(output->surface, output->width * output->scale, output->height * output->scale);
     if (!egl_display) {
         egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, output->state->display, NULL);
         eglInitialize(egl_display, NULL, NULL);
@@ -609,7 +611,7 @@ static void init_egl(struct display_output *output) {
     }
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glViewport(0, 0, output->width, output->height);
+    glViewport(0, 0, output->width * output->scale, output->height * output->scale);
 }
 
 static void destroy_display_output(struct display_output *output) {
@@ -746,6 +748,18 @@ static const struct zxdg_output_v1_listener xdg_output_listener = {
     .done = xdg_output_handle_done,
 };
 
+static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
+    struct display_output *output = data;
+    output->scale = scale;
+}
+
+static const struct wl_output_listener output_listener = {
+    .geometry = nop,
+    .mode = nop,
+    .scale = output_scale,
+    .done = nop,
+};
+
 static void handle_global(void *data, struct wl_registry *registry,
         uint32_t name, const char *interface, uint32_t version) {
     (void) version;
@@ -755,9 +769,11 @@ static void handle_global(void *data, struct wl_registry *registry,
         state->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         struct display_output *output = calloc(1, sizeof(struct display_output));
+        output->scale = 1; // Default to no scaling
         output->state = state;
         output->wl_name = name;
         output->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 3);
+        wl_output_add_listener(output->wl_output, &output_listener, output);
 
         wl_list_insert(&state->outputs, &output->link);
 
