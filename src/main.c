@@ -133,6 +133,8 @@ static void render(struct display_output *output) {
     if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context)) {
         cflp_error("Failed to make output surface current 0x%X", eglGetError());
     }
+    glViewport(0, 0, output->width * output->scale, output->height * output->scale);
+
     // Render frame
     mpv_render_context_render(mpv_glcontext, render_params);
 
@@ -656,10 +658,11 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
         eglSwapInterval(egl_display, 0);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glViewport(0, 0, output->width * output->scale, output->height * output->scale);
 
         // Start render loop
         render(output);
+    } else {
+        wl_egl_window_resize(output->egl_window, output->width * output->scale, output->height * output->scale, 0, 0);
     }
 }
 
