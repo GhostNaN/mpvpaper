@@ -44,6 +44,8 @@ struct display_output {
     struct wl_state *state;
     struct wl_surface *surface;
     struct zwlr_layer_surface_v1 *layer_surface;
+    struct wl_egl_window* egl_window;
+    EGLSurface *egl_surface;
 
     uint32_t width, height;
     uint32_t scale;
@@ -51,10 +53,8 @@ struct display_output {
     struct wl_list link;
 };
 
-static struct wl_egl_window* egl_window;
 static EGLDisplay *egl_display;
 static EGLContext *egl_context;
-static EGLSurface *egl_surface;
 
 static mpv_handle *mpv;
 static mpv_render_context *mpv_glcontext;
@@ -96,12 +96,8 @@ static void exit_cleanup() {
     if (mpv)
         mpv_terminate_destroy(mpv);
 
-    if (egl_surface)
-        eglDestroySurface(egl_display, egl_surface);
     if (egl_context)
         eglDestroyContext(egl_display, egl_context);
-    if (egl_window)
-        wl_egl_window_destroy(egl_window);
 }
 
 static void exit_mpvpaper(int reason) {
@@ -140,7 +136,7 @@ static void render(struct display_output *output) {
     wl_callback_add_listener(callback, &wl_surface_frame_listener, output);
 
     // Display frame
-    if (!eglSwapBuffers(egl_display, egl_surface))
+    if (!eglSwapBuffers(egl_display, output->egl_surface))
         cflp_error("Failed to swap egl buffers 0x%X", eglGetError());
 }
 
@@ -554,7 +550,7 @@ static void init_mpv(struct display_output *output) {
 static void init_egl(struct display_output *output) {
 
     wl_surface_set_buffer_scale(output->surface, output->scale);
-    egl_window = wl_egl_window_create(output->surface, output->width * output->scale, output->height * output->scale);
+    output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale, output->height * output->scale);
     if (!egl_display) {
         egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, output->state->display, NULL);
         eglInitialize(egl_display, NULL, NULL);
@@ -601,8 +597,8 @@ static void init_egl(struct display_output *output) {
         }
     }
 
-    egl_surface = eglCreatePlatformWindowSurface(egl_display, config, egl_window, NULL);
-    eglMakeCurrent(egl_display, egl_surface, egl_surface, egl_context);
+    output->egl_surface = eglCreatePlatformWindowSurface(egl_display, config, output->egl_window, NULL);
+    eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context);
     eglSwapInterval(egl_display, 0);
 
     if(!gladLoadGLLoader((GLADloadproc) eglGetProcAddress)) {
@@ -625,9 +621,11 @@ static void destroy_display_output(struct display_output *output) {
     if (output->surface != NULL) {
         wl_surface_destroy(output->surface);
     }
-    if (egl_display && strcmp(output->name,output->state->monitor) == 0) {
-        eglDestroySurface(egl_display, egl_surface);
-        wl_egl_window_destroy(egl_window);
+    if (output->egl_surface) {
+        eglDestroySurface(egl_display, output->egl_surface);
+    }
+    if (output->egl_window) {
+        wl_egl_window_destroy(output->egl_window);
     }
     zxdg_output_v1_destroy(output->xdg_output);
     wl_output_destroy(output->wl_output);
