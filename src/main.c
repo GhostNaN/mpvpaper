@@ -53,6 +53,7 @@ struct display_output {
     struct wl_list link;
 };
 
+static EGLConfig egl_config;
 static EGLDisplay *egl_display;
 static EGLContext *egl_context;
 
@@ -128,6 +129,10 @@ static void render(struct display_output *output) {
         // Flip rendering (needed due to flipped GL coordinate system).
         {MPV_RENDER_PARAM_FLIP_Y, &(int){1}},
     };
+
+    if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context)) {
+        cflp_error("Failed to make output surface current 0x%X", eglGetError());
+    }
     // Render frame
     mpv_render_context_render(mpv_glcontext, render_params);
 
@@ -547,14 +552,10 @@ static void init_mpv(struct display_output *output) {
     mpv_command(mpv, (const char*[]) {"set", "idle", "no", NULL});
 }
 
-static void init_egl(struct display_output *output) {
+static void init_egl(struct wl_state *state) {
+    egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, state->display, NULL);
+    eglInitialize(egl_display, NULL, NULL);
 
-    wl_surface_set_buffer_scale(output->surface, output->scale);
-    output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale, output->height * output->scale);
-    if (!egl_display) {
-        egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, output->state->display, NULL);
-        eglInitialize(egl_display, NULL, NULL);
-    }
     eglBindAPI(EGL_OPENGL_API);
     const EGLint win_attrib[] = {
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -565,49 +566,44 @@ static void init_egl(struct display_output *output) {
         EGL_NONE
     };
 
-    EGLConfig config;
     EGLint config_len;
-    eglChooseConfig(egl_display, win_attrib, &config, 1, &config_len);
+    eglChooseConfig(egl_display, win_attrib, &egl_config, 1, &config_len);
 
-    if (!egl_context) {
-        // Check for OpenGL compatibility for creating egl context
-        static const struct { int major, minor; } gl_versions[] = {
-            {4, 6}, {4, 5}, {4, 4}, {4, 3}, {4, 2}, {4, 1}, {4, 0},
-            {3, 3}, {3, 2}, {3, 1}, {3, 0},
-            {0, 0}
+    // Check for OpenGL compatibility for creating egl context
+    static const struct { int major, minor; } gl_versions[] = {
+        {4, 6}, {4, 5}, {4, 4}, {4, 3}, {4, 2}, {4, 1}, {4, 0},
+        {3, 3}, {3, 2}, {3, 1}, {3, 0},
+        {0, 0}
+    };
+    egl_context = NULL;
+    for (uint i = 0; gl_versions[i].major > 0; i++) {
+        const EGLint ctx_attrib[] = {
+            EGL_CONTEXT_MAJOR_VERSION, gl_versions[i].major,
+            EGL_CONTEXT_MINOR_VERSION, gl_versions[i].major,
+            EGL_NONE
         };
-        egl_context = NULL;
-        for (uint i = 0; gl_versions[i].major > 0; i++) {
-            const EGLint ctx_attrib[] = {
-                EGL_CONTEXT_MAJOR_VERSION, gl_versions[i].major,
-                EGL_CONTEXT_MINOR_VERSION, gl_versions[i].major,
-                EGL_NONE
-            };
-            egl_context = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, ctx_attrib);
-            if (egl_context) {
-                if (VERBOSE) {
-                    cflp_info("OpenGL %i.%i EGL context created", gl_versions[i].major, gl_versions[i].minor);
-                }
-                break;
+        egl_context = eglCreateContext(egl_display, egl_config, EGL_NO_CONTEXT, ctx_attrib);
+        if (egl_context) {
+            if (VERBOSE) {
+                cflp_info("OpenGL %i.%i EGL context created", gl_versions[i].major, gl_versions[i].minor);
             }
-        }
-        if (!egl_context) {
-            cflp_error("Failed to create EGL context");
-            exit_mpvpaper(1);
+            break;
         }
     }
+    if (!egl_context) {
+        cflp_error("Failed to create EGL context");
+        exit_mpvpaper(1);
+    }
 
-    output->egl_surface = eglCreatePlatformWindowSurface(egl_display, config, output->egl_window, NULL);
-    eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context);
-    eglSwapInterval(egl_display, 0);
+    if (!eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_context)) {
+        cflp_error("Failed to make context current");
+        exit_mpvpaper(1);
+    }
 
     if(!gladLoadGLLoader((GLADloadproc) eglGetProcAddress)) {
         cflp_error("Failed to load OpenGL");
         exit_mpvpaper(1);
     }
-
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glViewport(0, 0, output->width * output->scale, output->height * output->scale);
 }
 
 static void destroy_display_output(struct display_output *output) {
@@ -641,15 +637,27 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     output->width = width;
     output->height = height;
     zwlr_layer_surface_v1_ack_configure(surface, serial);
+    wl_surface_set_buffer_scale(output->surface, output->scale);
 
     // Setup render loop
-    init_egl(output);
+    struct wl_state *state = output->state;
+    if (!egl_display) {
+        init_egl(state);
+    }
     if (!mpv) {
         init_mpv(output);
         init_threads();
     }
 
-    if (egl_display && mpv_glcontext) {
+    if (!output->egl_window) {
+        output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale, output->height * output->scale);
+        output->egl_surface = eglCreatePlatformWindowSurface(egl_display, egl_config, output->egl_window, NULL);
+        eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context);
+        eglSwapInterval(egl_display, 0);
+
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glViewport(0, 0, output->width * output->scale, output->height * output->scale);
+
         // Start render loop
         render(output);
     }
