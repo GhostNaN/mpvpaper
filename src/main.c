@@ -737,12 +737,14 @@ static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output
 
     struct display_output *output = data;
 
-    if (strcmp(output->name, output->state->monitor) == 0 && !output->layer_surface) {
+    bool name_ok = (strcmp(output->name, output->state->monitor) == 0) ||
+        (strcmp(output->state->monitor, "*") == 0);
+    if (name_ok && !output->layer_surface) {
         if (VERBOSE)
             cflp_info("Output %s (%s) selected", output->name, output->identifier);
         create_layer_surface(output);
     }
-    else {
+    if (!name_ok) {
         if (VERBOSE)
             cflp_warning("Output %s (%s) not selected", output->name, output->identifier);
         destroy_display_output(output);
