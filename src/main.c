@@ -1,8 +1,11 @@
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <getopt.h>
 #include <unistd.h>
+#include <poll.h>
 #include <pthread.h>
 #include <time.h>
 #include <stdbool.h>
@@ -51,6 +54,9 @@ struct display_output {
     uint32_t scale;
 
     struct wl_list link;
+
+    struct wl_callback *frame_callback;
+    bool redraw_needed;
 };
 
 static EGLConfig egl_config;
@@ -59,6 +65,7 @@ static EGLContext *egl_context;
 
 static mpv_handle *mpv;
 static mpv_render_context *mpv_glcontext;
+static int wakeup_pipe[2];
 static char *video_path;
 static char *mpv_options;
 
@@ -128,6 +135,9 @@ static void render(struct display_output *output) {
         }},
         // Flip rendering (needed due to flipped GL coordinate system).
         {MPV_RENDER_PARAM_FLIP_Y, &(int){1}},
+        // Do not wait for a fresh frame to render
+        {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &(int){0}},
+        {MPV_RENDER_PARAM_INVALID, NULL},
     };
 
     if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context)) {
@@ -139,8 +149,9 @@ static void render(struct display_output *output) {
     mpv_render_context_render(mpv_glcontext, render_params);
 
     // Callback new frame
-    struct wl_callback *callback = wl_surface_frame(output->surface);
-    wl_callback_add_listener(callback, &wl_surface_frame_listener, output);
+    output->frame_callback = wl_surface_frame(output->surface);
+    wl_callback_add_listener(output->frame_callback, &wl_surface_frame_listener, output);
+    output->redraw_needed = false;
 
     // Display frame
     if (!eglSwapBuffers(egl_display, output->egl_surface))
@@ -149,6 +160,8 @@ static void render(struct display_output *output) {
 
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t frame_time) {
     (void) frame_time;
+    struct display_output *output = data;
+    output->frame_callback = NULL;
     wl_callback_destroy(callback);
 
     // Reset deadman switch timer
@@ -169,9 +182,10 @@ static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t
     }
 
     // Render next frame
-    if (!halt_info.kill_render_loop)
-        render(data);
-    else {
+    if (!halt_info.kill_render_loop) {
+        if (output->redraw_needed)
+            render(output);
+    } else {
         halt_info.kill_render_loop = 0;
         exit_mpvpaper(0);
     }
@@ -488,6 +502,12 @@ static void *get_proc_address_mpv(void *ctx, const char *name){
     return eglGetProcAddress(name);
 }
 
+static void render_update_callback(void *callback_ctx) {
+    (void)callback_ctx;
+    uint8_t tmp = 0;
+    write(wakeup_pipe[1], &tmp, 1);
+}
+
 static void init_mpv(struct display_output *output) {
 
     mpv = mpv_create();
@@ -518,6 +538,7 @@ static void init_mpv(struct display_output *output) {
         {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &(mpv_opengl_init_params){
             .get_proc_address = get_proc_address_mpv,
         }},
+        {MPV_RENDER_PARAM_INVALID, NULL},
     };
     if (mpv_render_context_create(&mpv_glcontext, mpv, params) < 0)
         cflp_error("Failed to initialize mpv GL context");
@@ -552,6 +573,8 @@ static void init_mpv(struct display_output *output) {
 
     // mpv must never idle
     mpv_command(mpv, (const char*[]) {"set", "idle", "no", NULL});
+
+    mpv_render_context_set_update_callback(mpv_glcontext, render_update_callback, NULL);
 }
 
 static void init_egl(struct wl_state *state) {
@@ -1010,6 +1033,13 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (pipe(wakeup_pipe) == -1) {
+        cflp_error("Creating a self-pipe failed.");
+        return EXIT_FAILURE;
+    }
+    fcntl(wakeup_pipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(wakeup_pipe[1], F_SETFD, FD_CLOEXEC);
+
     state.display = wl_display_connect(NULL);
     if (!state.display) {
         cflp_error("Unable to connect to the compositor. "
@@ -1043,8 +1073,39 @@ int main(int argc, char **argv) {
     }
 
     state.run_display = 1;
-    while (wl_display_dispatch(state.display) != -1) {
-        // NOP
+    while (true) {
+        if (wl_display_flush(state.display) == -1 && errno != EAGAIN)
+            break;
+
+        struct pollfd fds[2];
+        fds[0].fd = wl_display_get_fd(state.display);
+        fds[0].events = POLLIN;
+        fds[1].fd = wakeup_pipe[0];
+        fds[1].events = POLLIN;
+
+        if (poll(fds, sizeof(fds) / sizeof(fds[0]), -1) == -1 && errno != EINTR)
+            break;
+
+        if (fds[0].revents & POLLIN) {
+            if (wl_display_dispatch(state.display) == -1)
+                break;
+        }
+
+        if (fds[1].revents & POLLIN) {
+            // Empty the pipe
+            char tmp[64];
+            read(wakeup_pipe[0], tmp, sizeof(tmp));
+
+            mpv_render_context_update(mpv_glcontext);
+
+            wl_list_for_each(output, &state.outputs, link) {
+                // Redraw immediately if not waiting for frame callback
+                if (output->frame_callback == NULL)
+                    render(output);
+                else
+                    output->redraw_needed = true;
+            }
+        }
     }
 
     struct display_output *tmp_output;
