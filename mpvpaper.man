@@ -54,6 +54,11 @@ Simple example:
 mpvpaper DP-2 /path/to/video
 .RE
 
+To play the same video on all outputs:
+.RS
+mpvpaper '*' /path/to/video
+.RE
+
 Forward mpv options by passing "--mpv-options" or "-o" like so:
 .RS
 mpvpaper -o "no-audio --loop-playlist shuffle" HDMI-A-1 www.url/to/playlist
