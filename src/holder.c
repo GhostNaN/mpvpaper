@@ -32,7 +32,6 @@ struct display_output {
     char *name;
 
     struct wl_state *state;
-    struct wl_buffer *buffer;
     struct wl_surface *surface;
     struct zwlr_layer_surface_v1 *layer_surface;
 
@@ -87,10 +86,10 @@ static struct wl_buffer *create_dummy_buffer(struct display_output *output) {
     int size = stride * HEIGHT;
 
     // Create shm
-    char name[] = "/wl_shm-dummy";
-    shm_unlink(name);
-    int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
-    shm_unlink(name);
+    const char SHM_NAME[] = "/wl_shm-dummy";
+    shm_unlink(SHM_NAME);
+    int fd = shm_open(SHM_NAME, O_RDWR | O_CREAT | O_EXCL, 0600);
+    shm_unlink(SHM_NAME);
     ftruncate(fd, size);
 
     struct wl_shm_pool *pool = wl_shm_create_pool(output->state->shm, fd, size);
@@ -104,20 +103,25 @@ static struct wl_buffer *create_dummy_buffer(struct display_output *output) {
 const static struct wl_callback_listener wl_surface_frame_listener;
 
 static void create_surface_frame(struct display_output *output) {
-    output->buffer = create_dummy_buffer(output);
+
+    struct wl_buffer *dummy_buffer = create_dummy_buffer(output);
+
     // Callback new frame
     struct wl_callback *callback = wl_surface_frame(output->surface);
     wl_callback_add_listener(callback, &wl_surface_frame_listener, output);
-    wl_surface_attach(output->surface, output->buffer, 0, 0);
+    wl_surface_attach(output->surface, dummy_buffer, 0, 0);
     wl_surface_damage(output->surface, 0, 0, output->width, output->height);
     wl_surface_commit(output->surface);
+
+    wl_buffer_destroy(dummy_buffer);
 }
 
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t time) {
     wl_callback_destroy(callback);
 
     if (halt_info.stoplist) {
-        check_stoplist(); // If checking stoplist took longer than a sec
+        check_stoplist(); 
+        // If checking stoplist took longer than a second don't revive
         if (time - halt_info.start_time < 1000)
             revive_mpvpaper();
     }
@@ -159,8 +163,9 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
 
     if (halt_info.stoplist)
         check_stoplist();
-    if (halt_info.auto_stop)
+    if (halt_info.auto_stop) {
         create_surface_frame(output);
+    }
 }
 
 static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *surface) {
