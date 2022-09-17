@@ -81,7 +81,7 @@ static struct {
 
     int is_paused;
     bool frame_ready;
-    bool kill_render_loop;
+    bool stop_render_loop;
 
 } halt_info = {NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0};
 
@@ -93,6 +93,17 @@ static bool VERBOSE = 0;
 static void nop() {}
 
 static void exit_cleanup() {
+
+    // Give mpv a chance to finish
+    halt_info.stop_render_loop = 1;
+    for (int trys=10; halt_info.stop_render_loop && trys > 0; trys--) {
+        usleep(10000);
+    }
+    // If render loop failed to stop it's self
+    if (halt_info.stop_render_loop && VERBOSE)
+        cflp_warning("Failed to quit mpv");
+    
+
     // Cancel all threads
     for(uint i=0; threads[i] != 0; i++) {
         if (pthread_self() != threads[i])
@@ -115,7 +126,7 @@ static void exit_mpvpaper(int reason) {
     exit(reason);
 }
 
-static void *exit_by_pthread() { exit_mpvpaper(1); pthread_exit(NULL);}
+static void *exit_by_pthread() { exit_mpvpaper(EXIT_SUCCESS); pthread_exit(NULL);}
 
 static void handle_signal(int signum) {
     (void) signum;
@@ -146,7 +157,10 @@ static void render(struct display_output *output) {
     glViewport(0, 0, output->width * output->scale, output->height * output->scale);
 
     // Render frame
-    mpv_render_context_render(mpv_glcontext, render_params);
+    int err = mpv_render_context_render(mpv_glcontext, render_params);
+    if (err < 0) {
+        cflp_error("Failed to render frame with mpv, %s", mpv_error_string(err));
+    }
 
     // Callback new frame
     output->frame_callback = wl_surface_frame(output->surface);
@@ -173,22 +187,16 @@ static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t
         while (halt_info.is_paused) {
             if (time(NULL) - start_time >= 1)
                 break;
-            if (halt_info.kill_render_loop) {
-                halt_info.kill_render_loop = 0;
-                exit_mpvpaper(0);
+            if (halt_info.stop_render_loop) {
+                halt_info.stop_render_loop = 0;
             }
             usleep(1000);
         }
     }
 
     // Render next frame
-    if (!halt_info.kill_render_loop) {
-        if (output->redraw_needed)
-            render(output);
-    } else {
-        halt_info.kill_render_loop = 0;
-        exit_mpvpaper(0);
-    }
+    if (output->redraw_needed)
+        render(output);
 }
 
 const static struct wl_callback_listener wl_surface_frame_listener = {
@@ -229,6 +237,7 @@ static void stop_mpvpaper() {
     }
 
     exit_cleanup();
+
     // Start holder script
     execv(strcat(exe_dir, "mpvpaper-holder"), argv);
 
@@ -369,7 +378,7 @@ static void *handle_mpv_events() {
     const int MPV_OBSERVE_PAUSE = 1;
     mpv_observe_property(mpv, MPV_OBSERVE_PAUSE, "pause", MPV_FORMAT_FLAG);
 
-    while (!halt_info.kill_render_loop) {
+    while (true) {
         if (SLIDESHOW_TIME) {
             if ((time(NULL) - start_time) >= SLIDESHOW_TIME) {
                 mpv_command_async(mpv, 0, (const char*[]) {"playlist-next", NULL});
@@ -380,21 +389,8 @@ static void *handle_mpv_events() {
         mpv_event* event = mpv_wait_event(mpv, 0);
 
         if (event->event_id == MPV_EVENT_SHUTDOWN) {
-            // Give mpv a chance to finish
-            halt_info.kill_render_loop = 1;
-            for (int trys=10; halt_info.kill_render_loop && trys > 0; trys--) {
-                usleep(10000);
-            }
-
-            // render loop didn't kill itself, this may cause crashing
-            if (halt_info.kill_render_loop) {
-                if (VERBOSE)
-                    cflp_warning("Failed to quit mpv");
-                exit_mpvpaper(0);
-            }
-            break;
-        }
-        else if (event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
+            exit_mpvpaper(EXIT_SUCCESS);
+        } else if (event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
             if (event->reply_userdata == MPV_OBSERVE_PAUSE) {
                 mpv_get_property(mpv, "pause", MPV_FORMAT_FLAG, &mpv_paused);
                 if (mpv_paused) {
@@ -429,8 +425,7 @@ static void init_threads() {
     if (halt_info.auto_pause) {
         pthread_create(&threads[id], NULL, handle_auto_pause, NULL);
         id++;
-    }
-    else if (halt_info.auto_stop) {
+    } else if (halt_info.auto_stop) {
         pthread_create(&threads[id], NULL, handle_auto_stop, NULL);
         id++;
     }
@@ -505,7 +500,8 @@ static void *get_proc_address_mpv(void *ctx, const char *name){
 static void render_update_callback(void *callback_ctx) {
     (void)callback_ctx;
     uint8_t tmp = 0;
-    write(wakeup_pipe[1], &tmp, 1);
+    if(write(wakeup_pipe[1], &tmp, 1) == -1)
+        exit_mpvpaper(EXIT_FAILURE);
 }
 
 static void init_mpv(struct display_output *output) {
@@ -513,7 +509,7 @@ static void init_mpv(struct display_output *output) {
     mpv = mpv_create();
     if (!mpv) {
         cflp_error("Failed creating mpv context");
-        exit_mpvpaper(1);
+        exit_mpvpaper(EXIT_FAILURE);
     }
 
     set_init_mpv_options(output->state);
@@ -521,7 +517,7 @@ static void init_mpv(struct display_output *output) {
     int err = mpv_initialize(mpv);
     if (err < 0) {
         cflp_error("Failed to init mpv, %s", mpv_error_string(err));
-        exit_mpvpaper(1);
+        exit_mpvpaper(EXIT_FAILURE);
     }
 
     // Force libmpv vo as nothing else will work
@@ -617,17 +613,17 @@ static void init_egl(struct wl_state *state) {
     }
     if (!egl_context) {
         cflp_error("Failed to create EGL context");
-        exit_mpvpaper(1);
+        exit_mpvpaper(EXIT_FAILURE);
     }
 
     if (!eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_context)) {
         cflp_error("Failed to make context current");
-        exit_mpvpaper(1);
+        exit_mpvpaper(EXIT_FAILURE);
     }
 
     if(!gladLoadGLLoader((GLADloadproc) eglGetProcAddress)) {
         cflp_error("Failed to load OpenGL");
-        exit_mpvpaper(1);
+        exit_mpvpaper(EXIT_FAILURE);
     }
 }
 
@@ -867,6 +863,24 @@ static char **get_watch_list(char *path_name) {
     return NULL;
 }
 
+static void copy_argv(int argc, char **argv) {
+    int argv_alloc_size = 0;
+    for(int i=0; argv[i] != NULL; i++) {
+        argv_alloc_size += strlen(argv[i])+1;
+    }
+    halt_info.argv_copy = calloc(argv_alloc_size, sizeof(char));
+
+    int j = 0;
+    for(int i=0; i < argc; i++) {
+        if (strcmp(argv[i], "-Z") == 0) { // Remove hidden opt
+            i++; // Skip optind
+        } else {
+            halt_info.argv_copy[j] = strdup(argv[i]);
+            j++;
+        }
+    }
+}
+
 static void set_watch_lists() {
     const char *home_dir = getenv("HOME");
 
@@ -918,13 +932,13 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "* See man page for more details\n"
         ;
 
-    if(argc > 2) {
-        char *layer_name;
 
-        char opt;
-        while((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
+    char *layer_name;
 
-            switch (opt) {
+    char opt;
+    while((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
+
+        switch (opt) {
             case 'h':
                 fprintf(stdout, "%s", usage);
                 exit(EXIT_SUCCESS);
@@ -951,7 +965,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 SLIDESHOW_TIME = atoi(optarg);
                 if (SLIDESHOW_TIME == 0) 
                     cflp_warning("0 or invalid time set for slideshow\n"
-                                 "Please use a positive integer");
+                                    "Please use a positive integer");
                 break;
             case 'l':
                 layer_name = strdup(optarg);
@@ -967,14 +981,13 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                     state->surface_layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
                 } else {
                     cflp_error("%s is not a shell surface layer\n"
-                               "Your options are: top, bottom, background and overlay", layer_name);
+                                "Your options are: top, bottom, background and overlay", layer_name);
                     exit(EXIT_FAILURE);
                 }
                 break;
             case 'o':
-                free(mpv_options);
                 mpv_options = strdup(optarg);
-                /* replace spaces with newlines */
+                // Replace spaces with newlines
                 for (int i = 0; i < (int)strlen(mpv_options); i++) {
                     if (mpv_options[i] == ' ')
                         mpv_options[i] = '\n';
@@ -984,23 +997,33 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
             case 'Z': // Hidden option to recover video pos after stopping
                 halt_info.save_info = strdup(optarg);
                 break;
-            }
-        }
-        if(optind + 1 >= argc) {
-            fprintf(stderr, "%s", usage);
-            exit(EXIT_FAILURE);
-        }
-        state->monitor = strdup(argv[optind]);
-        video_path = strdup(argv[optind+1]);
-
-        if(!system("pidof swaybg > /dev/null")) {
-            cflp_warning("swaybg is running. This may block mpvpaper from being seen.");
         }
     }
-    else {
+
+    // Need at least a display and video
+    if(optind + 1 >= argc) {
         cflp_error("Not enough args passed");
         fprintf(stderr, "%s", usage);
         exit(EXIT_FAILURE);
+    }
+
+    state->monitor = strdup(argv[optind]);
+    video_path = strdup(argv[optind+1]);
+}
+
+static void check_paper_processes() {
+    // Check for other wallpaper process running
+    const char *other_wallpapers[] = {"swaybg", "glpaper", "hyprpaper",  "wpaperd"};
+    char wallpaper_sbuffer[50] = {0};
+    for (int i=0; i < sizeof(other_wallpapers) / sizeof(other_wallpapers[0]); i++) {
+
+        strcpy(wallpaper_sbuffer, "pidof ");
+        strcat(wallpaper_sbuffer, other_wallpapers[i]);
+        strcat(wallpaper_sbuffer, " > /dev/null");
+
+        if (!system(wallpaper_sbuffer)) {
+            cflp_warning("%s is running. This may block mpvpaper from being seen.", other_wallpapers[i]);
+        }
     }
 }
 
@@ -1009,30 +1032,17 @@ int main(int argc, char **argv) {
     signal(SIGQUIT, handle_signal);
     signal(SIGTERM, handle_signal);
 
+    check_paper_processes();
+
     struct wl_state state = {0};
     wl_list_init(&state.outputs);
 
     parse_command_line(argc, argv, &state);
     set_watch_lists();
+    if (halt_info.auto_stop || halt_info.stoplist)
+        copy_argv(argc, argv);
 
-    // Copy argv
-    int argv_alloc_size = 0;
-    for(int i=0; argv[i] != NULL; i++) {
-        argv_alloc_size += strlen(argv[i])+1;
-    }
-    halt_info.argv_copy = calloc(argv_alloc_size, sizeof(char));
-
-    int j = 0;
-    for(int i=0; i < argc; i++) {
-        if (strcmp(argv[i], "-Z") == 0) { // Remove hidden opt
-            i++; // Skip optind
-        }
-        else {
-            halt_info.argv_copy[j] = strdup(argv[i]);
-            j++;
-        }
-    }
-
+    // Create pipe for checking render_update_callback()
     if (pipe(wakeup_pipe) == -1) {
         cflp_error("Creating a self-pipe failed.");
         return EXIT_FAILURE;
@@ -1040,11 +1050,12 @@ int main(int argc, char **argv) {
     fcntl(wakeup_pipe[0], F_SETFD, FD_CLOEXEC);
     fcntl(wakeup_pipe[1], F_SETFD, FD_CLOEXEC);
 
+    // Connect to Wayland compositor
     state.display = wl_display_connect(NULL);
     if (!state.display) {
-        cflp_error("Unable to connect to the compositor. "
-                "If your compositor is running, check or set the "
-                "WAYLAND_DISPLAY environment variable.");
+        cflp_error("Unable to connect to the compositor."
+                          "If your compositor is running, check or set the"
+                          "WAYLAND_DISPLAY environment variable.");
         return EXIT_FAILURE;
     }
 
@@ -1073,6 +1084,8 @@ int main(int argc, char **argv) {
     }
 
     state.run_display = 1;
+
+    // Main Loop
     while (true) {
         if (wl_display_flush(state.display) == -1 && errno != EAGAIN)
             break;
@@ -1083,21 +1096,34 @@ int main(int argc, char **argv) {
         fds[1].fd = wakeup_pipe[0];
         fds[1].events = POLLIN;
 
-        if (poll(fds, sizeof(fds) / sizeof(fds[0]), -1) == -1 && errno != EINTR)
-            break;
+        // Wait for MPV to request a new frame to be drawn
+        int poll_err = 0;
+        while (poll_err == 0) {
+            poll_err = poll(fds, sizeof(fds) / sizeof(fds[0]), 10);  // 10ms timeout
+            if (poll_err == -1 && errno != EINTR)
+                break;
+
+            if (halt_info.stop_render_loop) {
+                halt_info.stop_render_loop = 0;
+                sleep(2); // Wait at least 2 secs to be killed
+            }
+        }
 
         if (fds[0].revents & POLLIN) {
             if (wl_display_dispatch(state.display) == -1)
                 break;
         }
 
+        // MPV is ready to draw a new frame
         if (fds[1].revents & POLLIN) {
             // Empty the pipe
             char tmp[64];
-            read(wakeup_pipe[0], tmp, sizeof(tmp));
+            if(read(wakeup_pipe[0], tmp, sizeof(tmp)) == -1)
+                break;
 
             mpv_render_context_update(mpv_glcontext);
 
+            // Draw frame for all outputs
             wl_list_for_each(output, &state.outputs, link) {
                 // Redraw immediately if not waiting for frame callback
                 if (output->frame_callback == NULL)
