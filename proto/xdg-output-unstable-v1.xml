@@ -138,7 +138,7 @@
 	  advertise a logical size of 1920×1080,
 
 	- A compositor using a fractional scale of 1.5 will advertise a
-	  logical size to 2560×1620.
+	  logical size of 2560×1440.
 
 	For example, for a wl_output mode 1920×1080 and a 90 degree rotation,
 	the compositor will advertise a logical size of 1080x1920.
@@ -206,10 +206,12 @@
 	output via :1'.
 
 	The description event is sent after creating an xdg_output (see
-	xdg_output_manager.get_xdg_output). This event is only sent once per
+	xdg_output_manager.get_xdg_output) and whenever the description
+	changes. The description is optional, and may not be sent at all.
+
+	For objects of version 2 and lower, this event is only sent once per
 	xdg_output, and the description does not change over the lifetime of
-	the wl_output global. The description is optional, and may not be sent
-	at all.
+	the wl_output global.
       </description>
       <arg name="description" type="string" summary="output description"/>
     </event>
