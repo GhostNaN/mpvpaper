@@ -1,16 +1,15 @@
+#include <fcntl.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <getopt.h>
-#include <unistd.h>
-#include <time.h>
-#include <sys/mman.h>
-#include <fcntl.h>
 #include <stdbool.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <unistd.h>
 
 #include <wayland-client.h>
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
-#include "xdg-output-unstable-v1-client-protocol.h"
 
 typedef unsigned int uint;
 
@@ -19,16 +18,13 @@ struct wl_state {
     struct wl_compositor *compositor;
     struct wl_shm *shm;
     struct zwlr_layer_shell_v1 *layer_shell;
-    struct zxdg_output_manager_v1 *xdg_output_manager;
     struct wl_list outputs;  // struct display_output::link
     char* monitor; // User selected output
-    int run_display;
 };
 
 struct display_output {
     uint32_t wl_name;
     struct wl_output *wl_output;
-    struct zxdg_output_v1 *xdg_output;
     char *name;
 
     struct wl_state *state;
@@ -55,7 +51,7 @@ static void revive_mpvpaper() {
     // Get the "real" cwd
     char exe_dir[1024];
     int cut_point = readlink("/proc/self/exe", exe_dir, sizeof(exe_dir));
-    for(uint i=cut_point; i > 1; i--) {
+    for (uint i=cut_point; i > 1; i--) {
         if (exe_dir[i] == '/') {
             exe_dir[i+1] = '\0';
             break;
@@ -147,7 +143,6 @@ static void destroy_display_output(struct display_output *output) {
     if (output->surface != NULL) {
         wl_surface_destroy(output->surface);
     }
-    zxdg_output_v1_destroy(output->xdg_output);
     wl_output_destroy(output->wl_output);
 
     free(output->name);
@@ -163,13 +158,12 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
 
     if (halt_info.stoplist)
         check_stoplist();
-    if (halt_info.auto_stop) {
+    if (halt_info.auto_stop)
         create_surface_frame(output);
-    }
 }
 
 static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *surface) {
-    (void) surface;
+    (void)surface;
     destroy_display_output(data);
 }
 
@@ -202,16 +196,15 @@ static void create_layer_surface(struct display_output *output) {
 
 }
 
-static void xdg_output_handle_name(void *data,
-        struct zxdg_output_v1 *xdg_output, const char *name) {
-    (void) xdg_output;
+static void output_name(void *data, struct wl_output *wl_output, const char *name) {
+    (void)wl_output;
 
     struct display_output *output = data;
     output->name = strdup(name);
 }
 
-static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output) {
-    (void) xdg_output;
+static void output_done(void *data, struct wl_output *wl_output) {
+    (void)wl_output;
 
     struct display_output *output = data;
 
@@ -225,17 +218,17 @@ static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output
     }
 }
 
-static const struct zxdg_output_v1_listener xdg_output_listener = {
-    .logical_position = nop,
-    .logical_size = nop,
-    .name = xdg_output_handle_name,
-    .description = nop,
-    .done = xdg_output_handle_done,
+static const struct wl_output_listener output_listener = {
+    .geometry = nop,
+	.mode = nop,
+	.done = output_done,
+	.scale = nop,
+	.name = output_name,
+	.description = nop,
 };
 
-static void handle_global(void *data, struct wl_registry *registry,
-        uint32_t name, const char *interface, uint32_t version) {
-    (void) version;
+static void handle_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version) {
+    (void)version;
 
     struct wl_state *state = data;
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
@@ -248,26 +241,17 @@ static void handle_global(void *data, struct wl_registry *registry,
         struct display_output *output = calloc(1, sizeof(struct display_output));
         output->state = state;
         output->wl_name = name;
-        output->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 3);
-
+        output->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 4);
+        wl_output_add_listener(output->wl_output, &output_listener, output);
         wl_list_insert(&state->outputs, &output->link);
 
-        if (state->run_display) {
-            output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
-                state->xdg_output_manager, output->wl_output);
-            zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
-        }
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
-        state->layer_shell = wl_registry_bind(registry, name,
-            &zwlr_layer_shell_v1_interface, 1);
-    } else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
-        state->xdg_output_manager = wl_registry_bind(registry, name,
-            &zxdg_output_manager_v1_interface, 2);
+        state->layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, 1);
     }
 }
 
 static void handle_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
-    (void) registry;
+    (void)registry;
 
     struct wl_state *state = data;
     struct display_output *output, *tmp;
@@ -319,8 +303,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         {"slideshow", required_argument, NULL, 'n'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
-        {0, 0, 0, 0}
-    };
+        {0, 0, 0, 0}};
 
     const char *usage =
         "Usage: mpvpaper-holder <mpvpaper options>\n"
@@ -333,29 +316,27 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "And if the wallpaper needs to be seen when drawn\n"
         "- Set with \"-s\" or \"--auto-stop\" mpvpaper option\n";
 
-    if(argc > 2) {
-        char opt;
-        while((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
 
-            switch (opt) {
-                case 'h':
-                    fprintf(stdout, "%s", usage);
-                    exit(EXIT_SUCCESS);
-                case 's':
-                    halt_info.auto_stop = 1;
-                    break;
-            }
+    char opt;
+    while ((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
+
+        switch (opt) {
+            case 'h':
+                fprintf(stdout, "%s", usage);
+                exit(EXIT_SUCCESS);
+            case 's':
+                halt_info.auto_stop = 1;
+                break;
         }
-        if(optind + 1 >= argc) {
-            fprintf(stderr, "%s", usage);
-            exit(EXIT_FAILURE);
-        }
-        state->monitor = strdup(argv[optind]);
     }
-    else {
+
+    // Need at least a display and video
+    if (optind + 1 >= argc) {
         fprintf(stderr, "%s", usage);
         exit(EXIT_FAILURE);
     }
+
+    state->monitor = strdup(argv[optind]);
 }
 
 int main(int argc, char **argv) {
@@ -367,11 +348,11 @@ int main(int argc, char **argv) {
 
     // Copy argv
     int argv_alloc_size = 0;
-    for(int i=0; argv[i] != NULL; i++) {
+    for (int i=0; argv[i] != NULL; i++) {
         argv_alloc_size += strlen(argv[i])+1;
     }
     halt_info.argv_copy = calloc(argv_alloc_size+1, sizeof(char));
-    for(int i=0; i < argc; i++) {
+    for (int i=0; i < argc; i++) {
         halt_info.argv_copy[i] = strdup(argv[i]);
     }
 
@@ -383,18 +364,8 @@ int main(int argc, char **argv) {
     struct wl_registry *registry = wl_display_get_registry(state.display);
     wl_registry_add_listener(registry, &registry_listener, &state);
     wl_display_roundtrip(state.display);
-    if (state.compositor == NULL || state.layer_shell == NULL ||
-            state.xdg_output_manager == NULL) {
-
+    if (state.compositor == NULL || state.layer_shell == NULL) {
         return EXIT_FAILURE;
-    }
-
-    struct display_output *output;
-    wl_list_for_each(output, &state.outputs, link) {
-        output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
-            state.xdg_output_manager, output->wl_output);
-        zxdg_output_v1_add_listener(output->xdg_output,
-            &xdg_output_listener, output);
     }
 
     // Check outputs
@@ -403,12 +374,11 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    state.run_display = 1;
     while (wl_display_dispatch(state.display) != -1) {
         // NOP
     }
 
-    struct display_output *tmp_output;
+    struct display_output *output, *tmp_output;
     wl_list_for_each_safe(output, tmp_output, &state.outputs, link) {
         destroy_display_output(output);
     }

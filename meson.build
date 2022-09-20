@@ -15,13 +15,11 @@ scanner_client_header=generator(scanner,output: '@BASENAME@-client-protocol.h',a
 
 protocols_src=[
   scanner_private_code.process('proto/wlr-layer-shell-unstable-v1.xml'),
-  scanner_private_code.process('proto/xdg-output-unstable-v1.xml'),
   scanner_private_code.process(wl_protocols.get_pkgconfig_variable('pkgdatadir')+'/stable/xdg-shell/xdg-shell.xml')
 ]
 
 protocols_headers=[
-  scanner_client_header.process('proto/wlr-layer-shell-unstable-v1.xml'),
-  scanner_client_header.process('proto/xdg-output-unstable-v1.xml')
+  scanner_client_header.process('proto/wlr-layer-shell-unstable-v1.xml')
 ]
 
 lib_protocols=static_library('protocols',protocols_src+protocols_headers,dependencies: wl_client)

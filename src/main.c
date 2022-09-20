@@ -1,20 +1,19 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <poll.h>
+#include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <poll.h>
-#include <pthread.h>
 #include <stdbool.h>
-#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
-#include "xdg-output-unstable-v1-client-protocol.h"
 
 #include <glad/glad.h>
 #include <glad/glad_egl.h>
@@ -30,17 +29,14 @@ struct wl_state {
     struct wl_display *display;
     struct wl_compositor *compositor;
     struct zwlr_layer_shell_v1 *layer_shell;
-    struct zxdg_output_manager_v1 *xdg_output_manager;
     struct wl_list outputs;  // struct display_output::link
     char *monitor; // User selected output
     int surface_layer;
-    bool run_display;
 };
 
 struct display_output {
     uint32_t wl_name;
     struct wl_output *wl_output;
-    struct zxdg_output_v1 *xdg_output;
     char *name;
     char *identifier;
 
@@ -644,7 +640,6 @@ static void destroy_display_output(struct display_output *output) {
     if (output->egl_window) {
         wl_egl_window_destroy(output->egl_window);
     }
-    zxdg_output_v1_destroy(output->xdg_output);
     wl_output_destroy(output->wl_output);
 
     free(output->name);
@@ -722,15 +717,38 @@ static void create_layer_surface(struct display_output *output) {
     wl_surface_commit(output->surface);
 }
 
-static void xdg_output_handle_name(void *data, struct zxdg_output_v1 *xdg_output, const char *name) {
-    (void)xdg_output;
+static void output_name(void *data, struct wl_output *wl_output, const char *name) {
+    (void)wl_output;
 
     struct display_output *output = data;
     output->name = strdup(name);
 }
 
-static void xdg_output_handle_description(void *data, struct zxdg_output_v1 *xdg_output, const char *description) {
-    (void)xdg_output;
+static void output_done(void *data, struct wl_output *wl_output) {
+    (void)wl_output;
+
+    struct display_output *output = data;
+
+    bool name_ok = (strcmp(output->name, output->state->monitor) == 0) || (strcmp(output->state->monitor, "*") == 0);
+    if (name_ok && !output->layer_surface) {
+        if (VERBOSE)
+            cflp_info("Output %s (%s) selected", output->name, output->identifier);
+        create_layer_surface(output);
+    }
+    if (!name_ok) {
+        if (VERBOSE)
+            cflp_warning("Output %s (%s) not selected", output->name, output->identifier);
+        destroy_display_output(output);
+    }
+}
+
+static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
+    struct display_output *output = data;
+    output->scale = scale;
+}
+
+static void output_description(void *data, struct wl_output *wl_output, const char *description) {
+    (void)wl_output;
 
     struct display_output *output = data;
 
@@ -749,42 +767,13 @@ static void xdg_output_handle_description(void *data, struct zxdg_output_v1 *xdg
     }
 }
 
-static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output) {
-    (void)xdg_output;
-
-    struct display_output *output = data;
-
-    bool name_ok = (strcmp(output->name, output->state->monitor) == 0) || (strcmp(output->state->monitor, "*") == 0);
-    if (name_ok && !output->layer_surface) {
-        if (VERBOSE)
-            cflp_info("Output %s (%s) selected", output->name, output->identifier);
-        create_layer_surface(output);
-    }
-    if (!name_ok) {
-        if (VERBOSE)
-            cflp_warning("Output %s (%s) not selected", output->name, output->identifier);
-        destroy_display_output(output);
-    }
-}
-
-static const struct zxdg_output_v1_listener xdg_output_listener = {
-    .logical_position = nop,
-    .logical_size = nop,
-    .name = xdg_output_handle_name,
-    .description = xdg_output_handle_description,
-    .done = xdg_output_handle_done,
-};
-
-static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
-    struct display_output *output = data;
-    output->scale = scale;
-}
-
 static const struct wl_output_listener output_listener = {
     .geometry = nop,
-    .mode = nop,
-    .scale = output_scale,
-    .done = nop,
+	.mode = nop,
+	.done = output_done,
+	.scale = output_scale,
+	.name = output_name,
+	.description = output_description,
 };
 
 static void handle_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version) {
@@ -798,19 +787,12 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
         output->scale = 1; // Default to no scaling
         output->state = state;
         output->wl_name = name;
-        output->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 3);
+        output->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 4);
         wl_output_add_listener(output->wl_output, &output_listener, output);
-
         wl_list_insert(&state->outputs, &output->link);
 
-        if (state->run_display) {
-            output->xdg_output = zxdg_output_manager_v1_get_xdg_output(state->xdg_output_manager, output->wl_output);
-            zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
-        }
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
         state->layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, 1);
-    } else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
-        state->xdg_output_manager = wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, 2);
     }
 }
 
@@ -1054,15 +1036,9 @@ int main(int argc, char **argv) {
     struct wl_registry *registry = wl_display_get_registry(state.display);
     wl_registry_add_listener(registry, &registry_listener, &state);
     wl_display_roundtrip(state.display);
-    if (state.compositor == NULL || state.layer_shell == NULL || state.xdg_output_manager == NULL) {
+    if (state.compositor == NULL || state.layer_shell == NULL) {
         cflp_error("Missing a required Wayland interface");
         return EXIT_FAILURE;
-    }
-
-    struct display_output *output;
-    wl_list_for_each(output, &state.outputs, link) {
-        output->xdg_output = zxdg_output_manager_v1_get_xdg_output(state.xdg_output_manager, output->wl_output);
-        zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
     }
 
     // Check outputs
@@ -1071,8 +1047,6 @@ int main(int argc, char **argv) {
         cflp_error(":/ sorry about this but we can't seem to find any output.");
         return EXIT_FAILURE;
     }
-
-    state.run_display = 1;
 
     // Main Loop
     while (true) {
@@ -1113,6 +1087,7 @@ int main(int argc, char **argv) {
             mpv_render_context_update(mpv_glcontext);
 
             // Draw frame for all outputs
+            struct display_output *output;
             wl_list_for_each(output, &state.outputs, link) {
                 // Redraw immediately if not waiting for frame callback
                 if (output->frame_callback == NULL)
@@ -1123,7 +1098,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    struct display_output *tmp_output;
+    struct display_output *output, *tmp_output;
     wl_list_for_each_safe(output, tmp_output, &state.outputs, link) {
         destroy_display_output(output);
     }
