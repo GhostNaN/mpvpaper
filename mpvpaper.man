@@ -1,4 +1,4 @@
-.TH MPVPAPER 1 "February 2022" "mpvpaper 1.2.1" "User Manual"
+.TH MPVPAPER 1 "September 2022" "mpvpaper 1.3" "User Manual"
 .SH NAME
 mpvpaper \- video wallpaper player using mpv for wlroots
 .SH SYNOPSIS
@@ -8,11 +8,6 @@ mpvpaper [options] <output> <url|path filename>
 .P
 \fBmpvpaper\fR is a wallpaper program for wlroots based Wayland compositors, such as Sway. 
 That allows you to play videos with \fBmpv\fR as your wallpaper.
-
-To see display outputs names, check the "not selected" error messages of:
-.RS
-mpvpaper -v a a
-.RE
 
 .SH OPTIONS
 .TP
@@ -59,13 +54,18 @@ To play the same video on all outputs:
 mpvpaper '*' /path/to/video
 .RE
 
+To see display outputs names, check the "not selected" error messages of:
+.RS
+mpvpaper -v a a
+.RE
+
 Forward mpv options by passing "--mpv-options" or "-o" like so:
 .RS
 mpvpaper -o "no-audio --loop-playlist shuffle" HDMI-A-1 www.url/to/playlist
 .RE
 
-You can also control mpvpaper just like \fBmpv\fR in the terminal with keyboard bindings. But if you
-would like to control mpvpaper while it's forked, you could use a mpv input-ipc-server like this:
+You can also control mpvpaper just like \fBmpv\fR in the terminal with keyboard bindings.
+But if you would like to control mpvpaper while it\'s forked, you could use a mpv input-ipc-server like this:
 .RS
 mpvpaper -o "input-ipc-server=/tmp/mpv-socket-DP-1" DP-1 /path/to/video
 .RE
@@ -75,7 +75,7 @@ Then input commands with \fBsocat\fR. For example, toggle pause:
 echo 'cycle pause' | socat - /tmp/mpv-socket-DP-1
 .RE
 
-For more commands read:
+For more mpv commands read:
 .UR https://mpv.io/manual/master/#command-interface
 .UE
 
@@ -96,7 +96,8 @@ List of program names that will cause mpvpaper to stop
 .RE .RE
 
 Add programs that can be found with the \fBpidof\fR command into the list and separate by spaces or newlines.
- For example: "firefox steam obs" or:
+.br .br
+For example: "firefox steam obs" or:
 .RS
  "firefox 
   steam 
@@ -111,7 +112,7 @@ Add programs that can be found with the \fBpidof\fR command into the list and se
 mpvpaper manipulates a feature of Wayland called a "surface frame callback"
 .P
 This feature of Wayland allows mpvpaper to draw/render only when it makes sense to do so.
-And one reason mpvpaper might not draw/render is if it's "hidden".
+And one reason mpvpaper might not draw/render is if it\'s "hidden".
 This is the magic behind the automagic pause/stop options.
 .P
 Whatever "hidden" means is up to compositor. As for Sway, "hidden" is if there is a fullscreen window
@@ -146,7 +147,9 @@ as it uses time to calculate when to act
 .SH AUTHOR
 Created by GhostNaN 
 
-.SM Inspired by scoopta's \fBglpaper\fR
+.SM Based on \fBswaybg\fR
+
+.SM Inspired by scoopta\'s \fBglpaper\fR
 
 Code Repository:
 .UR https://github.com/GhostNaN/mpvpaper/ 
