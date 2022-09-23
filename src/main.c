@@ -1090,8 +1090,10 @@ int main(int argc, char **argv) {
             struct display_output *output;
             wl_list_for_each(output, &state.outputs, link) {
                 // Redraw immediately if not waiting for frame callback
-                if (output->frame_callback == NULL)
-                    render(output);
+                if (output->frame_callback == NULL) {
+					if (output->egl_window && output->egl_surface)
+						render(output);
+				}
                 else
                     output->redraw_needed = true;
             }
