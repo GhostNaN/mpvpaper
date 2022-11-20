@@ -84,7 +84,7 @@ static struct {
 static pthread_t threads[5] = {0};
 
 static uint SLIDESHOW_TIME = 0;
-static bool VERBOSE = 0;
+static int VERBOSE = 0;
 
 static void nop() {}
 
@@ -147,16 +147,15 @@ static void render(struct display_output *output) {
         {MPV_RENDER_PARAM_INVALID, NULL},
     };
 
-    if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context)) {
+    if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context))
         cflp_error("Failed to make output surface current 0x%X", eglGetError());
-    }
+
     glViewport(0, 0, output->width * output->scale, output->height * output->scale);
 
     // Render frame
-    int err = mpv_render_context_render(mpv_glcontext, render_params);
-    if (err < 0) {
-        cflp_error("Failed to render frame with mpv, %s", mpv_error_string(err));
-    }
+    int mpv_err = mpv_render_context_render(mpv_glcontext, render_params);
+    if (mpv_err < 0)
+        cflp_error("Failed to render frame with mpv, %s", mpv_error_string(mpv_err));
 
     // Callback new frame
     output->frame_callback = wl_surface_frame(output->surface);
@@ -171,8 +170,10 @@ static void render(struct display_output *output) {
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t frame_time) {
     (void)frame_time;
     struct display_output *output = data;
-    output->frame_callback = NULL;
     wl_callback_destroy(callback);
+
+    // Display is ready for new frame
+    output->frame_callback = NULL;
 
     // Reset deadman switch timer
     halt_info.frame_ready = 1;
@@ -183,16 +184,19 @@ static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t
         while (halt_info.is_paused) {
             if (time(NULL) - start_time >= 1)
                 break;
-            if (halt_info.stop_render_loop) {
+            if (halt_info.stop_render_loop)
                 halt_info.stop_render_loop = 0;
-            }
+
             usleep(1000);
         }
     }
 
     // Render next frame
-    if (output->redraw_needed)
+    if (output->redraw_needed) {
+        if (VERBOSE == 2)
+            cflp_info("%s is ready for MPV to render the next frame", output->name);
         render(output);
+    }
 }
 
 const static struct wl_callback_listener wl_surface_frame_listener = {
@@ -263,9 +267,8 @@ static char *check_watch_list(char **list) {
         strcat(pid_name, " > /dev/null");
 
         // Stop if program is open
-        if (!system(pid_name)) {
+        if (!system(pid_name))
             return list[i];
-        }
     }
     return NULL;
 }
@@ -399,9 +402,8 @@ static void *handle_mpv_events() {
             }
         }
 
-        if (!halt_info.is_paused && mpv_paused) {
+        if (!halt_info.is_paused && mpv_paused)
             mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "no", NULL});
-        }
 
         pthread_usleep(10000);
     }
@@ -496,11 +498,13 @@ static void *get_proc_address_mpv(void *ctx, const char *name) {
 static void render_update_callback(void *callback_ctx) {
     (void)callback_ctx;
     uint8_t tmp = 0;
+
     if (write(wakeup_pipe[1], &tmp, 1) == -1)
         exit_mpvpaper(EXIT_FAILURE);
 }
 
-static void init_mpv(struct display_output *output) {
+static void init_mpv(const struct wl_state *state) {
+    int mpv_err;
 
     mpv = mpv_create();
     if (!mpv) {
@@ -508,11 +512,11 @@ static void init_mpv(struct display_output *output) {
         exit_mpvpaper(EXIT_FAILURE);
     }
 
-    set_init_mpv_options(output->state);
+    set_init_mpv_options(state);
 
-    int err = mpv_initialize(mpv);
-    if (err < 0) {
-        cflp_error("Failed to init mpv, %s", mpv_error_string(err));
+    mpv_err = mpv_initialize(mpv);
+    if (mpv_err < 0) {
+        cflp_error("Failed to init mpv, %s", mpv_error_string(mpv_err));
         exit_mpvpaper(EXIT_FAILURE);
     }
 
@@ -525,23 +529,29 @@ static void init_mpv(struct display_output *output) {
 
     // Have mpv render onto egl context
     mpv_render_param params[] = {
-        {MPV_RENDER_PARAM_WL_DISPLAY, output->state->display},
+        {MPV_RENDER_PARAM_WL_DISPLAY, state->display},
         {MPV_RENDER_PARAM_API_TYPE, MPV_RENDER_API_TYPE_OPENGL},
         {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &(mpv_opengl_init_params){
             .get_proc_address = get_proc_address_mpv,
         }},
         {MPV_RENDER_PARAM_INVALID, NULL},
     };
-    if (mpv_render_context_create(&mpv_glcontext, mpv, params) < 0)
-        cflp_error("Failed to initialize mpv GL context");
+    mpv_err = mpv_render_context_create(&mpv_glcontext, mpv, params);
+    if (mpv_err < 0) {
+        cflp_error("Failed to initialize mpv GL context, %s", mpv_error_string(mpv_err));
+        exit_mpvpaper(EXIT_FAILURE);
+    }
 
     // Restore video position after auto stop event
     char *default_start = NULL;
     if (halt_info.save_info) {
+
         char time_pos[10];
         char playlist_pos[10];
         sscanf(halt_info.save_info, "%s %s", time_pos, playlist_pos);
 
+        if (VERBOSE)
+            cflp_info("Restoring previous time: %s and playlist position: %s", time_pos, playlist_pos);
         // Save default start pos
         default_start = mpv_get_property_string(mpv, "start");
         // Restore video position
@@ -571,7 +581,10 @@ static void init_mpv(struct display_output *output) {
 
 static void init_egl(struct wl_state *state) {
     egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, state->display, NULL);
-    eglInitialize(egl_display, NULL, NULL);
+    if (!eglInitialize(egl_display, NULL, NULL)) {
+        cflp_error("Failed to initialize EGL 0x%X", eglGetError());
+        exit_mpvpaper(EXIT_FAILURE);
+    }
 
     eglBindAPI(EGL_OPENGL_API);
     const EGLint win_attrib[] = {
@@ -584,7 +597,10 @@ static void init_egl(struct wl_state *state) {
     };
 
     EGLint config_len;
-    eglChooseConfig(egl_display, win_attrib, &egl_config, 1, &config_len);
+    if (!eglChooseConfig(egl_display, win_attrib, &egl_config, 1, &config_len)) {
+        cflp_error("Failed to set EGL frame buffer config 0x%X", eglGetError());
+        exit_mpvpaper(EXIT_FAILURE);
+    }
 
     // Check for OpenGL compatibility for creating egl context
     static const struct { int major, minor; } gl_versions[] = {
@@ -601,45 +617,39 @@ static void init_egl(struct wl_state *state) {
         };
         egl_context = eglCreateContext(egl_display, egl_config, EGL_NO_CONTEXT, ctx_attrib);
         if (egl_context) {
-            if (VERBOSE) {
+            if (VERBOSE)
                 cflp_info("OpenGL %i.%i EGL context created", gl_versions[i].major, gl_versions[i].minor);
-            }
             break;
         }
     }
     if (!egl_context) {
-        cflp_error("Failed to create EGL context");
+        cflp_error("Failed to create EGL context 0x%X", eglGetError());
         exit_mpvpaper(EXIT_FAILURE);
     }
 
     if (!eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_context)) {
-        cflp_error("Failed to make context current");
+        cflp_error("Failed to make context current 0x%X", eglGetError());
         exit_mpvpaper(EXIT_FAILURE);
     }
 
     if (!gladLoadGLLoader((GLADloadproc)eglGetProcAddress)) {
-        cflp_error("Failed to load OpenGL");
+        cflp_error("Failed to load OpenGL 0x%X", eglGetError());
         exit_mpvpaper(EXIT_FAILURE);
     }
 }
 
 static void destroy_display_output(struct display_output *output) {
-    if (!output) {
+    if (!output)
         return;
-    }
     wl_list_remove(&output->link);
-    if (output->layer_surface != NULL) {
+    if (output->layer_surface != NULL)
         zwlr_layer_surface_v1_destroy(output->layer_surface);
-    }
-    if (output->surface != NULL) {
+    if (output->surface != NULL)
         wl_surface_destroy(output->surface);
-    }
-    if (output->egl_surface) {
+    if (output->egl_surface)
         eglDestroySurface(egl_display, output->egl_surface);
-    }
-    if (output->egl_window) {
+    if (output->egl_window)
         wl_egl_window_destroy(output->egl_window);
-    }
     wl_output_destroy(output->wl_output);
 
     free(output->name);
@@ -660,21 +670,34 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     struct wl_state *state = output->state;
     if (!egl_display) {
         init_egl(state);
+        if (VERBOSE)
+            cflp_success("EGL initialized");
     }
     if (!mpv) {
-        init_mpv(output);
+        init_mpv(state);
         init_threads();
+        if (VERBOSE)
+            cflp_success("MPV initialized");
     }
 
     if (!output->egl_window) {
         output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale, output->height * output->scale);
         output->egl_surface = eglCreatePlatformWindowSurface(egl_display, egl_config, output->egl_window, NULL);
-        eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context);
+        if (!output->egl_surface) {
+            cflp_error("Failed to create EGL surface for %s 0x%X", output->name, eglGetError());
+            destroy_display_output(output);
+            return;
+        }
+
+        if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context))
+            cflp_error("Failed to make output surface current 0x%X", eglGetError());
         eglSwapInterval(egl_display, 0);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
         // Start render loop
+        if (VERBOSE)
+            cflp_success("%s setup is complete and is ready to start rendering", output->name);
         render(output);
     } else {
         wl_egl_window_resize(output->egl_window, output->width * output->scale, output->height * output->scale, 0, 0);
@@ -870,6 +893,11 @@ static void set_watch_lists() {
     strcat(stop_path, "/.config/mpvpaper/stoplist");
     halt_info.stoplist = get_watch_list(stop_path);
     free(stop_path);
+
+    if (VERBOSE && halt_info.pauselist)
+        cflp_info("pauselist found and will be monitored");
+    if (VERBOSE && halt_info.stoplist)
+        cflp_info("stoplist found and will be monitored");
 }
 
 static void parse_command_line(int argc, char **argv, struct wl_state *state) {
@@ -892,7 +920,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "\n"
         "Options:\n"
         "--help         -h              Displays this help message\n"
-        "--verbose      -v              Be more verbose\n"
+        "--verbose      -v              Be more verbose (-vv for higher verbosity)\n"
         "--fork         -f              Forks mpvpaper so you can close the terminal\n"
         "--auto-pause   -p              Automagically* pause mpv when the wallpaper is hidden\n"
         "                               This saves CPU usage, more or less, seamlessly\n"
@@ -915,12 +943,12 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 fprintf(stdout, "%s", usage);
                 exit(EXIT_SUCCESS);
             case 'v':
-                VERBOSE = 1;
+                VERBOSE += 1;
                 break;
             case 'f':
-                if (fork() > 0) {
+                if (fork() > 0)
                     exit(EXIT_SUCCESS);
-                }
+
                 fclose(stdout);
                 fclose(stderr);
                 fclose(stdin);
@@ -974,6 +1002,9 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         }
     }
 
+    if (VERBOSE)
+        cflp_info("Verbose Level %i enabled", VERBOSE);
+
     // Need at least a display and video
     if (optind + 1 >= argc) {
         cflp_error("Not enough args passed");
@@ -989,15 +1020,15 @@ static void check_paper_processes() {
     // Check for other wallpaper process running
     const char *other_wallpapers[] = {"swaybg", "glpaper", "hyprpaper", "wpaperd"};
     char wallpaper_sbuffer[50] = {0};
+
     for (int i=0; i < sizeof(other_wallpapers) / sizeof(other_wallpapers[0]); i++) {
 
         strcpy(wallpaper_sbuffer, "pidof ");
         strcat(wallpaper_sbuffer, other_wallpapers[i]);
         strcat(wallpaper_sbuffer, " > /dev/null");
 
-        if (!system(wallpaper_sbuffer)) {
+        if (!system(wallpaper_sbuffer))
             cflp_warning("%s is running. This may block mpvpaper from being seen.", other_wallpapers[i]);
-        }
     }
 }
 
@@ -1032,6 +1063,8 @@ int main(int argc, char **argv) {
             "If your compositor is running, check or set the WAYLAND_DISPLAY environment variable.");
         return EXIT_FAILURE;
     }
+    if (VERBOSE)
+        cflp_success("Connected to Wayland compositor");
 
     struct wl_registry *registry = wl_display_get_registry(state.display);
     wl_registry_add_listener(registry, &registry_listener, &state);
@@ -1091,11 +1124,15 @@ int main(int argc, char **argv) {
             wl_list_for_each(output, &state.outputs, link) {
                 // Redraw immediately if not waiting for frame callback
                 if (output->frame_callback == NULL) {
-					if (output->egl_window && output->egl_surface)
-						render(output);
-				}
-                else
+                    // Avoid crash when output is destroyed 
+                    if (output->egl_window && output->egl_surface) {
+                        if (VERBOSE == 2)
+                            cflp_info("MPV is ready to render the next frame for %s", output->name);
+                        render(output);
+                    }
+                } else {
                     output->redraw_needed = true;
+                }
             }
         }
     }

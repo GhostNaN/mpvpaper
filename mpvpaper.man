@@ -15,7 +15,7 @@ That allows you to play videos with \fBmpv\fR as your wallpaper.
 Displays usage options
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
-Be more verbose
+Be more verbose  (-vv for higher verbosity)
 .TP
 \fB\-f\fR, \fB\-\-fork\fR
 Forks mpvpaper so you can close the terminal
