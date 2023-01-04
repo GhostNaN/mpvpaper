@@ -98,7 +98,7 @@ static void exit_cleanup() {
     // If render loop failed to stop it's self
     if (halt_info.stop_render_loop && VERBOSE)
         cflp_warning("Failed to quit mpv");
-    
+
 
     // Cancel all threads
     for (uint i=0; threads[i] != 0; i++) {
@@ -657,9 +657,9 @@ static void destroy_display_output(struct display_output *output) {
     free(output);
 }
 
-static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface, uint32_t serial, 
+static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface, uint32_t serial,
         uint32_t width, uint32_t height) {
-        
+
     struct display_output *output = data;
     output->width = width;
     output->height = height;
@@ -747,15 +747,31 @@ static void output_name(void *data, struct wl_output *wl_output, const char *nam
     output->name = strdup(name);
 }
 
+static const bool output_name_matches(const char *name, const char **options) {
+    for (size_t i = 0; options[i] != NULL; ++i) {
+        const char *opt = options[i];
+        if (VERBOSE >= 2) {
+            cflp_info("Checking if given output (%s) matches: %s", name, opt);
+        }
+        if (strcmp(name, opt) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static void output_done(void *data, struct wl_output *wl_output) {
     (void)wl_output;
 
     struct display_output *output = data;
 
-    bool name_ok = (strcmp(output->name, output->state->monitor) == 0) || (strcmp(output->state->monitor, "*") == 0);
+    const char *possible_names[] = { output->name, output->identifier, "*", NULL };
+    bool name_ok = output_name_matches(output->state->monitor, possible_names);
+
     if (name_ok && !output->layer_surface) {
         if (VERBOSE)
-            cflp_info("Output %s (%s) selected", output->name, output->identifier);
+            cflp_success("Output %s (%s) selected", output->name, output->identifier);
         create_layer_surface(output);
     }
     if (!name_ok) {
@@ -918,18 +934,24 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "\n"
         "Example: mpvpaper -vs -o \"no-audio loop\" DP-2 /path/to/video\n"
         "\n"
+        "Args:\n"
+        "    <output>                       Name of the output on which to display the wallpaper.\n"
+        "                                   This may be either the 'port' name (HDMI-A-1) or the longer\n"
+        "                                   description identifier of make, model, and serial; similar to Sway.\n"
+        "    <url|path filename>            Path to the media to be displayed as the wallpaper.\n"
+        "\n"
         "Options:\n"
-        "--help         -h              Displays this help message\n"
-        "--verbose      -v              Be more verbose (-vv for higher verbosity)\n"
-        "--fork         -f              Forks mpvpaper so you can close the terminal\n"
-        "--auto-pause   -p              Automagically* pause mpv when the wallpaper is hidden\n"
-        "                               This saves CPU usage, more or less, seamlessly\n"
-        "--auto-stop    -s              Automagically* stop mpv when the wallpaper is hidden\n"
-        "                               This saves CPU/RAM usage, although more abruptly\n"
-        "--slideshow    -n SECS         Slideshow mode plays the next video in a playlist every ? seconds\n"
-        "                               And passes mpv options \"loop loop-playlist\" for convenience\n"
-        "--layer        -l LAYER        Specifies shell surface layer to run on (background by default)\n"
-        "--mpv-options  -o \"OPTIONS\"    Forwards mpv options (Must be within quotes\"\")\n"
+        "    --help         -h              Displays this help message\n"
+        "    --verbose      -v              Be more verbose (-vv for higher verbosity)\n"
+        "    --fork         -f              Forks mpvpaper so you can close the terminal\n"
+        "    --auto-pause   -p              Automagically* pause mpv when the wallpaper is hidden\n"
+        "                                   This saves CPU usage, more or less, seamlessly\n"
+        "    --auto-stop    -s              Automagically* stop mpv when the wallpaper is hidden\n"
+        "                                   This saves CPU/RAM usage, although more abruptly\n"
+        "    --slideshow    -n SECS         Slideshow mode plays the next video in a playlist every ? seconds\n"
+        "                                   And passes mpv options \"loop loop-playlist\" for convenience\n"
+        "    --layer        -l LAYER        Specifies shell surface layer to run on (background by default)\n"
+        "    --mpv-options  -o \"OPTIONS\"    Forwards mpv options (Must be within quotes\"\")\n"
         "\n"
         "* See man page for more details\n";
 
@@ -963,7 +985,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 break;
             case 'n':
                 SLIDESHOW_TIME = atoi(optarg);
-                if (SLIDESHOW_TIME == 0) 
+                if (SLIDESHOW_TIME == 0)
                     cflp_warning(
                         "0 or invalid time set for slideshow\n"
                         "Please use a positive integer");
@@ -1124,7 +1146,7 @@ int main(int argc, char **argv) {
             wl_list_for_each(output, &state.outputs, link) {
                 // Redraw immediately if not waiting for frame callback
                 if (output->frame_callback == NULL) {
-                    // Avoid crash when output is destroyed 
+                    // Avoid crash when output is destroyed
                     if (output->egl_window && output->egl_surface) {
                         if (VERBOSE == 2)
                             cflp_info("MPV is ready to render the next frame for %s", output->name);
