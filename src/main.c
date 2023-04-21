@@ -581,6 +581,10 @@ static void init_mpv(const struct wl_state *state) {
 
 static void init_egl(struct wl_state *state) {
     egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, state->display, NULL);
+    if (egl_display == EGL_NO_DISPLAY) {
+        cflp_error("Failed to get EGL display");
+        exit_mpvpaper(EXIT_FAILURE);
+    }
     if (!eglInitialize(egl_display, NULL, NULL)) {
         cflp_error("Failed to initialize EGL 0x%X", eglGetError());
         exit_mpvpaper(EXIT_FAILURE);
@@ -596,8 +600,8 @@ static void init_egl(struct wl_state *state) {
         EGL_NONE
     };
 
-    EGLint config_len;
-    if (!eglChooseConfig(egl_display, win_attrib, &egl_config, 1, &config_len)) {
+    EGLint  num_config;
+    if (!eglChooseConfig(egl_display, win_attrib, &egl_config, 1, &num_config)) {
         cflp_error("Failed to set EGL frame buffer config 0x%X", eglGetError());
         exit_mpvpaper(EXIT_FAILURE);
     }
@@ -612,7 +616,7 @@ static void init_egl(struct wl_state *state) {
     for (uint i = 0; gl_versions[i].major > 0; i++) {
         const EGLint ctx_attrib[] = {
             EGL_CONTEXT_MAJOR_VERSION, gl_versions[i].major,
-            EGL_CONTEXT_MINOR_VERSION, gl_versions[i].major,
+            EGL_CONTEXT_MINOR_VERSION, gl_versions[i].minor,
             EGL_NONE
         };
         egl_context = eglCreateContext(egl_display, egl_config, EGL_NO_CONTEXT, ctx_attrib);
@@ -657,9 +661,9 @@ static void destroy_display_output(struct display_output *output) {
     free(output);
 }
 
-static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface, uint32_t serial, 
+static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface, uint32_t serial,
         uint32_t width, uint32_t height) {
-        
+
     struct display_output *output = data;
     output->width = width;
     output->height = height;
@@ -672,12 +676,6 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
         init_egl(state);
         if (VERBOSE)
             cflp_success("EGL initialized");
-    }
-    if (!mpv) {
-        init_mpv(state);
-        init_threads();
-        if (VERBOSE)
-            cflp_success("MPV initialized");
     }
 
     if (!output->egl_window) {
@@ -694,14 +692,19 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
         eglSwapInterval(egl_display, 0);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-
-        // Start render loop
-        if (VERBOSE)
-            cflp_success("%s setup is complete and is ready to start rendering", output->name);
-        render(output);
     } else {
         wl_egl_window_resize(output->egl_window, output->width * output->scale, output->height * output->scale, 0, 0);
     }
+
+    if (!mpv) {
+        init_mpv(state);
+        init_threads();
+        if (VERBOSE)
+            cflp_success("MPV initialized");
+    }
+
+    // Start render loop
+    render(output);
 }
 
 static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *surface) {
