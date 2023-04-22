@@ -69,6 +69,7 @@ static struct {
     char **pauselist;
     char **stoplist;
 
+    int argc;
     char **argv_copy;
     char *save_info;
 
@@ -79,7 +80,7 @@ static struct {
     bool frame_ready;
     bool stop_render_loop;
 
-} halt_info = {NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0};
+} halt_info = {NULL, NULL, 0, NULL, NULL, 0, 0, 0, 0, 0};
 
 static pthread_t threads[5] = {0};
 
@@ -197,21 +198,17 @@ static void stop_mpvpaper() {
     const char *playlist_pos = mpv_get_property_string(mpv, "playlist-pos");
 
     char save_info[30];
-    sprintf(save_info, "%s %s", time_pos, playlist_pos);
+    snprintf(save_info, sizeof(save_info), "%s %s", time_pos, playlist_pos);
 
-    int argv_alloc_size = strlen("-Z")+1 + strlen(save_info)+1;
-    for (uint i=0;  halt_info.argv_copy[i] != NULL; i++) {
-        argv_alloc_size += strlen(halt_info.argv_copy[i])+1;
-    }
-    char **argv = calloc(argv_alloc_size+1, sizeof(char));
+    char **new_argv = calloc(halt_info.argc+3, sizeof(char*)); // Plus 3 for adding in -Z
 
-    uint i = 0;
-    for (i=0; halt_info.argv_copy[i] != NULL; i++) {
-        argv[i] = strdup(halt_info.argv_copy[i]);
+    int i;
+    for (i = 0; i < halt_info.argc; i++) {
+        new_argv[i] = strdup(halt_info.argv_copy[i]);
     }
-    argv[i] = "-Z";
-    argv[i+1] = save_info;
-    argv[i+2] = NULL;
+    new_argv[i] = strdup("-Z");
+    new_argv[i+1] = strdup(save_info);
+    new_argv[i+2] = NULL;
 
     // Get the "real" cwd
     char exe_dir[1024];
@@ -226,7 +223,7 @@ static void stop_mpvpaper() {
     exit_cleanup();
 
     // Start holder script
-    execv(strcat(exe_dir, "mpvpaper-holder"), argv);
+    execv(strcat(exe_dir, "mpvpaper-holder"), new_argv);
 
     cflp_error("Failed to stop mpvpaper");
     exit(EXIT_FAILURE);
@@ -822,17 +819,15 @@ static char **get_watch_list(char *path_name) {
     return NULL;
 }
 
-static void copy_argv(int argc, char **argv) {
-    int argv_alloc_size = 0;
-    for (int i=0; argv[i] != NULL; i++) {
-        argv_alloc_size += strlen(argv[i])+1;
-    }
-    halt_info.argv_copy = calloc(argv_alloc_size, sizeof(char));
+static void copy_argv(int argc, char* argv[]) {
+    halt_info.argc = argc;
+    halt_info.argv_copy = calloc(argc+1, sizeof(char*));
 
     int j = 0;
     for (int i=0; i < argc; i++) {
         if (strcmp(argv[i], "-Z") == 0) { // Remove hidden opt
             i++; // Skip optind
+            halt_info.argc -= 2;
         } else {
             halt_info.argv_copy[j] = strdup(argv[i]);
             j++;

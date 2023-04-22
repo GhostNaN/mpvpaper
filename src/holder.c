@@ -39,11 +39,10 @@ struct display_output {
 static struct {
     char **argv_copy;
     char **stoplist;
-
     bool auto_stop;
 
     int start_time;
-} halt_info = {NULL, NULL, 0, 0};
+} halt_info = {NULL, NULL, false, 0};
 
 static void nop() {}
 
@@ -112,19 +111,20 @@ static void create_surface_frame(struct display_output *output) {
     wl_buffer_destroy(dummy_buffer);
 }
 
-static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t time) {
+static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t frame_time) {
+    (void)frame_time;
     wl_callback_destroy(callback);
 
     if (halt_info.stoplist) {
-        check_stoplist(); 
-        // If checking stoplist took longer than a second don't revive
-        if (time - halt_info.start_time < 1000)
+        check_stoplist();
+        // If checking stoplist and frame callback took longer than a second don't revive
+        if (frame_time - halt_info.start_time < 1000)
             revive_mpvpaper();
-    }
-    else
+    } else {
         revive_mpvpaper();
+    }
 
-    halt_info.start_time = time;
+    halt_info.start_time = frame_time;
     create_surface_frame(data);
 }
 
@@ -133,24 +133,22 @@ const static struct wl_callback_listener wl_surface_frame_listener = {
 };
 
 static void destroy_display_output(struct display_output *output) {
-    if (!output) {
+    if (!output)
         return;
-    }
     wl_list_remove(&output->link);
-    if (output->layer_surface != NULL) {
+    if (output->layer_surface != NULL)
         zwlr_layer_surface_v1_destroy(output->layer_surface);
-    }
-    if (output->surface != NULL) {
+    if (output->surface != NULL)
         wl_surface_destroy(output->surface);
-    }
     wl_output_destroy(output->wl_output);
 
     free(output->name);
     free(output);
 }
 
-static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface,
-        uint32_t serial, uint32_t width, uint32_t height) {
+static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface, uint32_t serial, 
+        uint32_t width, uint32_t height) {
+
     struct display_output *output = data;
     output->width = width;
     output->height = height;
@@ -208,14 +206,11 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
     struct display_output *output = data;
 
-    bool name_ok = (strcmp(output->name, output->state->monitor) == 0) ||
-        (strcmp(output->state->monitor, "*") == 0);
-    if (name_ok && !output->layer_surface) {
+    bool name_ok = (strcmp(output->name, output->state->monitor) == 0) || (strcmp(output->state->monitor, "*") == 0);
+    if (name_ok && !output->layer_surface)
         create_layer_surface(output);
-    }
-    if (!name_ok) {
+    if (!name_ok)
         destroy_display_output(output);
-    }
 }
 
 static const struct wl_output_listener output_listener = {
@@ -233,11 +228,9 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
     struct wl_state *state = data;
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
         state->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
-    }
-    else if (strcmp(interface, wl_shm_interface.name) == 0) {
+    } else if (strcmp(interface, wl_shm_interface.name) == 0) {
         state->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
-    }
-    else if (strcmp(interface, wl_output_interface.name) == 0) {
+    } else if (strcmp(interface, wl_output_interface.name) == 0) {
         struct display_output *output = calloc(1, sizeof(struct display_output));
         output->state = state;
         output->wl_name = name;
@@ -246,7 +239,7 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
         wl_list_insert(&state->outputs, &output->link);
 
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
-        state->layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, 1);
+        state->layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface,1);
     }
 }
 
@@ -267,6 +260,14 @@ static const struct wl_registry_listener registry_listener = {
     .global = handle_global,
     .global_remove = handle_global_remove,
 };
+
+static void copy_argv(int argc, char* argv[]) {
+    halt_info.argv_copy = calloc(argc+1, sizeof(char*));
+
+    for (int i = 0; i < argc; i++) {
+        halt_info.argv_copy[i] = strdup(argv[i]);
+    }
+}
 
 static void set_stop_list() {
 
@@ -345,21 +346,11 @@ int main(int argc, char **argv) {
 
     parse_command_line(argc, argv, &state);
     set_stop_list();
-
-    // Copy argv
-    int argv_alloc_size = 0;
-    for (int i=0; argv[i] != NULL; i++) {
-        argv_alloc_size += strlen(argv[i])+1;
-    }
-    halt_info.argv_copy = calloc(argv_alloc_size+1, sizeof(char));
-    for (int i=0; i < argc; i++) {
-        halt_info.argv_copy[i] = strdup(argv[i]);
-    }
+    copy_argv(argc, argv);
 
     state.display = wl_display_connect(NULL);
-    if (!state.display) {
+    if (!state.display)
         return EXIT_FAILURE;
-    }
 
     struct wl_registry *registry = wl_display_get_registry(state.display);
     wl_registry_add_listener(registry, &registry_listener, &state);
@@ -370,9 +361,8 @@ int main(int argc, char **argv) {
 
     // Check outputs
     wl_display_roundtrip(state.display);
-    if (wl_list_empty(&state.outputs)) {
+    if (wl_list_empty(&state.outputs))
         return EXIT_FAILURE;
-    }
 
     while (wl_display_dispatch(state.display) != -1) {
         // NOP
