@@ -178,19 +178,6 @@ static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t
     // Reset deadman switch timer
     halt_info.frame_ready = 1;
 
-    // Sleep more while paused
-    if (halt_info.is_paused) {
-        int start_time = time(NULL);
-        while (halt_info.is_paused) {
-            if (time(NULL) - start_time >= 1)
-                break;
-            if (halt_info.stop_render_loop)
-                halt_info.stop_render_loop = 0;
-
-            usleep(1000);
-        }
-    }
-
     // Render next frame
     if (output->redraw_needed) {
         if (VERBOSE == 2)
@@ -275,27 +262,23 @@ static char *check_watch_list(char **list) {
 
 static void *monitor_pauselist() {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
-    bool is_paused = 0;
+    bool list_paused = 0;
 
     while (halt_info.pauselist) {
-        if (!halt_info.is_paused) {
-            char *app;
-            while ((app = check_watch_list(halt_info.pauselist))) {
-                if (app && !is_paused) {
-                    if (VERBOSE)
-                        cflp_info("Pausing for %s", app);
-                    mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "yes", NULL});
-                    is_paused = 1;
-                    halt_info.is_paused += 1;
-                }
-                pthread_sleep(1);
-            }
-            if (is_paused) {
-                is_paused = 0;
-                if (halt_info.is_paused)
-                    halt_info.is_paused -= 1;
-            }
+
+        char *app = check_watch_list(halt_info.pauselist);
+        if (app && !list_paused && !halt_info.is_paused) {
+            if (VERBOSE)
+                cflp_info("Pausing for %s", app);
+            mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "yes", NULL});
+            list_paused = 1;
+            halt_info.is_paused += 1;
+        } else if (!app && list_paused) {
+            list_paused = 0;
+            if (halt_info.is_paused)
+                halt_info.is_paused -= 1;
         }
+
         pthread_sleep(1);
     }
     pthread_exit(NULL);
@@ -305,12 +288,14 @@ static void *monitor_stoplist() {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
     while (halt_info.stoplist) {
+
         char *app = check_watch_list(halt_info.stoplist);
         if (app) {
             if (VERBOSE)
                 cflp_info("Stopping for %s", app);
             stop_mpvpaper();
         }
+
         pthread_sleep(1);
     }
     pthread_exit(NULL);
@@ -318,31 +303,24 @@ static void *monitor_stoplist() {
 
 static void *handle_auto_pause() {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+    bool auto_paused = 0;
 
     while (halt_info.auto_pause) {
-        if (!halt_info.is_paused) {
-            time_t start_time = time(NULL);
-            bool is_paused = 0;
 
-            // Set deadman switch timer
-            halt_info.frame_ready = 0;
-            while (!halt_info.frame_ready) {
-                if ((time(NULL) - start_time) >= 2 && !is_paused) {
-                    if (VERBOSE)
-                        cflp_info("Pausing because mpvpaper is hidden");
-                    mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "yes", NULL});
-                    is_paused = 1;
-                    halt_info.is_paused += 1;
-                }
-                pthread_usleep(10000);
-            }
-            if (is_paused) {
-                is_paused = 0;
+        // Set deadman switch timer
+        halt_info.frame_ready = 0;
+        pthread_sleep(2);
+        if (!halt_info.frame_ready && !auto_paused && !halt_info.is_paused) {
+            if (VERBOSE)
+                    cflp_info("Pausing because mpvpaper is hidden");
+            mpv_command_async(mpv, 0, (const char*[]) {"set", "pause", "yes", NULL});
+            auto_paused = 1;
+            halt_info.is_paused += 1;
+        } else if (halt_info.frame_ready && auto_paused) {
+                auto_paused = 0;
                 if (halt_info.is_paused)
                     halt_info.is_paused -= 1;
-            }
         }
-        pthread_sleep(1);
     }
     pthread_exit(NULL);
 }
@@ -351,20 +329,15 @@ static void *handle_auto_stop() {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
     while (halt_info.auto_stop) {
-        time_t start_time = time(NULL);
 
         // Set deadman switch timer
         halt_info.frame_ready = 0;
-        while (!halt_info.frame_ready) {
-            if ((time(NULL) - start_time) >= 2) {
-                if (VERBOSE)
+        pthread_sleep(2);
+        if (!halt_info.frame_ready) {
+            if (VERBOSE)
                     cflp_info("Stopping because mpvpaper is hidden");
-                stop_mpvpaper();
-                break;
-            }
-            pthread_usleep(10000);
+            stop_mpvpaper();
         }
-        pthread_sleep(1);
     }
     pthread_exit(NULL);
 }
