@@ -643,14 +643,6 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     zwlr_layer_surface_v1_ack_configure(surface, serial);
     wl_surface_set_buffer_scale(output->surface, output->scale);
 
-    // Setup render loop
-    struct wl_state *state = output->state;
-    if (!egl_display) {
-        init_egl(state);
-        if (VERBOSE)
-            cflp_success("EGL initialized");
-    }
-
     if (!output->egl_window) {
         output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale, output->height * output->scale);
         output->egl_surface = eglCreatePlatformWindowSurface(egl_display, egl_config, output->egl_window, NULL);
@@ -665,19 +657,12 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
         eglSwapInterval(egl_display, 0);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+        // Start render loop
+        render(output);
     } else {
         wl_egl_window_resize(output->egl_window, output->width * output->scale, output->height * output->scale, 0, 0);
     }
-
-    if (!mpv) {
-        init_mpv(state);
-        init_threads();
-        if (VERBOSE)
-            cflp_success("MPV initialized");
-    }
-
-    // Start render loop
-    render(output);
 }
 
 static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *surface) {
@@ -1042,6 +1027,16 @@ int main(int argc, char **argv) {
     if (VERBOSE)
         cflp_success("Connected to Wayland compositor");
 
+    // Init render before outputs
+    init_egl(&state);
+    if (VERBOSE)
+        cflp_success("EGL initialized");
+    init_mpv(&state);
+    init_threads();
+    if (VERBOSE)
+        cflp_success("MPV initialized");
+
+    // Setup wayland surfaces
     struct wl_registry *registry = wl_display_get_registry(state.display);
     wl_registry_add_listener(registry, &registry_listener, &state);
     wl_display_roundtrip(state.display);
