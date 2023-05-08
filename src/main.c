@@ -892,7 +892,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
     char *layer_name;
 
     char opt;
-    while ((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != 255) {
 
         switch (opt) {
             case 'h':
