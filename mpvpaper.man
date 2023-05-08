@@ -6,8 +6,19 @@ mpvpaper [options] <output> <url|path filename>
 
 .SH DESCRIPTION
 .P
-\fBmpvpaper\fR is a wallpaper program for wlroots based Wayland compositors, such as Sway. 
+\fBmpvpaper\fR is a wallpaper program for wlroots based Wayland compositors, such as Sway.
 That allows you to play videos with \fBmpv\fR as your wallpaper.
+
+.SH ARGUMENTS
+.TP
+\fB<output>\fR
+Name of the output on which to display the wallpaper. This may be either the \'port\'
+name (HDMI\-A\-1) or the longer description identifier of make, model, and serial; similar to Sway.
+
+See \fBsway\-output(5)\fR for more information, or run \fBswaymsg \-t get_outputs\fR to see current values.
+.TP
+\fB<url|path filename>\fR
+Path to the media to be displayed as the wallpaper.
 
 .SH OPTIONS
 .TP
@@ -81,7 +92,7 @@ For more mpv commands read:
 
 .SH FILES
 
-These files(watch lists) contain lists of program names that, if found running with \fBpidof\fR, 
+These files(watch lists) contain lists of program names that, if found running with \fBpidof\fR,
 will cause mpvpaper to pause/stop and must be created manually**
 
 .RS
@@ -99,8 +110,8 @@ Add programs that can be found with the \fBpidof\fR command into the list and se
 .br .br
 For example: "firefox steam obs" or:
 .RS
- "firefox 
-  steam 
+ "firefox
+  steam
   obs"
 .RE
 
@@ -134,25 +145,25 @@ Extra notes:
 .RS
 \(bu When mpvpaper is resuming after "stopping", mpvpaper should begin where it left off.
 Both in terms of time position and playlist position(if not shuffled)
-    
+
 \(bu There is a small time delay(1-2 secs.) with the automagic options
 as it uses time to calculate when to act
-    
-\(bu mpv user configs are loaded from 
+
+\(bu mpv user configs are loaded from
 .I ~/.config/mpv/
 
 .RE
 
 
 .SH AUTHOR
-Created by GhostNaN 
+Created by GhostNaN
 
 .SM Based on \fBswaybg\fR
 
 .SM Inspired by scoopta\'s \fBglpaper\fR
 
 Code Repository:
-.UR https://github.com/GhostNaN/mpvpaper/ 
+.UR https://github.com/GhostNaN/mpvpaper/
 .UE
 
 .SH SEE ALSO
