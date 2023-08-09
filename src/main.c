@@ -85,6 +85,7 @@ static struct {
 static pthread_t threads[5] = {0};
 
 static uint SLIDESHOW_TIME = 0;
+static bool SHOW_OUTPUTS = false;
 static int VERBOSE = 0;
 
 static void nop() {}
@@ -717,8 +718,8 @@ static void output_done(void *data, struct wl_output *wl_output) {
         create_layer_surface(output);
     }
     if (!name_ok) {
-        if (VERBOSE)
-            cflp_warning("Output %s (%s) not selected", output->name, output->identifier);
+        if (SHOW_OUTPUTS)
+            cflp_info("Output %s (%s) found", output->name, output->identifier);
         destroy_display_output(output);
     }
 }
@@ -860,6 +861,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
     static struct option long_options[] = {
         {"help", no_argument, NULL, 'h'},
+        {"help-output", no_argument, NULL, 'd'},
         {"verbose", no_argument, NULL, 'v'},
         {"fork", no_argument, NULL, 'f'},
         {"auto-pause", no_argument, NULL, 'p'},
@@ -876,6 +878,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "\n"
         "Options:\n"
         "--help         -h              Displays this help message\n"
+        "--help-output  -d              Displays all available outputs and quits\n"
         "--verbose      -v              Be more verbose (-vv for higher verbosity)\n"
         "--fork         -f              Forks mpvpaper so you can close the terminal\n"
         "--auto-pause   -p              Automagically* pause mpv when the wallpaper is hidden\n"
@@ -892,12 +895,16 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
     char *layer_name;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hdvfpsn:l:o:Z:", long_options, NULL)) != -1) {
 
         switch (opt) {
             case 'h':
                 fprintf(stdout, "%s", usage);
                 exit(EXIT_SUCCESS);
+            case 'd':
+                SHOW_OUTPUTS = true;
+                state->monitor = "";
+                return;
             case 'v':
                 VERBOSE += 1;
                 break;
@@ -1022,14 +1029,17 @@ int main(int argc, char **argv) {
     if (VERBOSE)
         cflp_success("Connected to Wayland compositor");
 
-    // Init render before outputs
-    init_egl(&state);
-    if (VERBOSE)
-        cflp_success("EGL initialized");
-    init_mpv(&state);
-    init_threads();
-    if (VERBOSE)
-        cflp_success("MPV initialized");
+    // Don't start egl and mpv if just displaying outputs
+    if (!SHOW_OUTPUTS) {
+        // Init render before outputs
+        init_egl(&state);
+        if (VERBOSE)
+            cflp_success("EGL initialized");
+        init_mpv(&state);
+        init_threads();
+        if (VERBOSE)
+            cflp_success("MPV initialized");
+    }
 
     // Setup wayland surfaces
     struct wl_registry *registry = wl_display_get_registry(state.display);
@@ -1042,6 +1052,8 @@ int main(int argc, char **argv) {
 
     // Check outputs
     wl_display_roundtrip(state.display);
+    if (SHOW_OUTPUTS)
+        exit(EXIT_SUCCESS);
     if (wl_list_empty(&state.outputs)) {
         cflp_error(":/ sorry about this but we can't seem to find any output.");
         return EXIT_FAILURE;

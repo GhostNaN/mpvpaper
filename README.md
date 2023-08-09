@@ -47,11 +47,7 @@ Then input commands with socat. For example, toggle pause:
 echo 'cycle pause' | socat - /tmp/mpv-socket
 ```
 For more mpv commands read: https://mpv.io/manual/master/#command-interface
-## Notes
-To see display outputs names, check the "not selected" error messages of:
-```
-mpvpaper -v a a
-```
+
 For more info on mpvpaper, please refer the the [man page](/mpvpaper.man).
 ## Acknowledgments
 - glpaper and swaybg for the initial boilerplate code, check em out here:

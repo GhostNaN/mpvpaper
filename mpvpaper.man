@@ -14,6 +14,9 @@ That allows you to play videos with \fBmpv\fR as your wallpaper.
 \fB\-h\fR, \fB\-\-help\fR
 Displays usage options
 .TP
+\fB\-d\fR, \fB\-\-help-output\fR
+Displays all available outputs and quits
+.TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Be more verbose  (-vv for higher verbosity)
 .TP
@@ -52,11 +55,6 @@ mpvpaper DP-2 /path/to/video
 To play the same video on all outputs:
 .RS
 mpvpaper '*' /path/to/video
-.RE
-
-To see display outputs names, check the "not selected" error messages of:
-.RS
-mpvpaper -v a a
 .RE
 
 Forward mpv options by passing "--mpv-options" or "-o" like so:
