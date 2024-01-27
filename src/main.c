@@ -531,8 +531,19 @@ static void init_mpv(const struct wl_state *state) {
         mpv_command(mpv, (const char*[]) {"set", "playlist-start", playlist_pos, NULL});
     }
 
-    mpv_command(mpv, (const char*[]) {"loadfile", video_path, NULL});
+    // Load media or try loading as playlist file
+    if (strstr(mpv_options, "--playlist=") == NULL) {
+        mpv_err = mpv_command(mpv, (const char*[]) {"loadfile", video_path, NULL});
+    } else {
+        mpv_err = mpv_command(mpv, (const char*[]) {"loadlist", video_path, NULL});
+    }
 
+    if (mpv_err < 0) {
+        cflp_error("Failed to load file, %s", mpv_error_string(mpv_err));
+        exit_mpvpaper(EXIT_FAILURE);
+    }
+
+    // Wait for file to load
     mpv_event *event = mpv_wait_event(mpv, 1);
     while (event->event_id != MPV_EVENT_FILE_LOADED) {
         event = mpv_wait_event(mpv, 1);
@@ -968,15 +979,32 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
     if (VERBOSE)
         cflp_info("Verbose Level %i enabled", VERBOSE);
 
-    // Need at least a display and video
-    if (optind + 1 >= argc) {
-        cflp_error("Not enough args passed");
+    // Need at least a output and file or playlist file
+    char *playlist_opt_pointer;
+    if((playlist_opt_pointer = strstr(mpv_options, "--playlist=")) != NULL) {
+        
+        // Get file from --playlist by cutting off --playlist=, duping then cutting off the end by \n or null terminator
+        char *playlist_opt = strdup(playlist_opt_pointer+strlen("--playlist="));
+        video_path = strtok(playlist_opt, "\n");
+
+        if (optind >= argc) {
+            cflp_error("Not enough args passed\n"
+                            "Please set output");
+            fprintf(stderr, "%s", usage);
+            exit(EXIT_FAILURE);
+        }
+    }
+    else if (optind + 1>= argc) {
+        cflp_error("Not enough args passed\n"
+                           "Please set output and url|path filename");
         fprintf(stderr, "%s", usage);
         exit(EXIT_FAILURE);
     }
 
     state->monitor = strdup(argv[optind]);
-    video_path = strdup(argv[optind+1]);
+    if (!video_path)
+        video_path = strdup(argv[optind+1]);
+
 }
 
 static void check_paper_processes() {
