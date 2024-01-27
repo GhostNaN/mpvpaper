@@ -331,8 +331,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         }
     }
 
-    // Need at least a display and video
-    if (optind + 1 >= argc) {
+    // Need at least a output
+    if (optind >= argc) {
         fprintf(stderr, "%s", usage);
         exit(EXIT_FAILURE);
     }
