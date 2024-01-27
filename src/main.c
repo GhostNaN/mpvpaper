@@ -411,31 +411,11 @@ static void init_threads() {
 }
 
 static void set_init_mpv_options(const struct wl_state *state) {
-    // Enable user control through terminal by default
+    // Enable user control through terminal by default and configs
     mpv_set_option_string(mpv, "input-default-bindings", "yes");
     mpv_set_option_string(mpv, "input-terminal", "yes");
     mpv_set_option_string(mpv, "terminal", "yes");
-
-    // Load user configs
-    const char *home_dir = getenv("HOME");
-    char *config_path = calloc(strlen(home_dir)+1 + 30, sizeof(char));
-    strcpy(config_path, home_dir);
-
-    char loaded_configs[50] = "";
-
-    strcpy(config_path+strlen(home_dir), "/.config/mpv/mpv.conf");
-    if (mpv_load_config_file(mpv, config_path) == 0)
-        strcat(loaded_configs, "mpv.conf ");
-    strcpy(config_path+strlen(home_dir), "/.config/mpv/input.conf");
-    if (mpv_load_config_file(mpv, config_path) == 0)
-        strcat(loaded_configs, "input.conf ");
-    strcpy(config_path+strlen(home_dir), "/.config/mpv/fonts.conf");
-    if (mpv_load_config_file(mpv, config_path) == 0)
-        strcat(loaded_configs, "fonts.conf ");
-    free(config_path);
-
-    if (VERBOSE && strcmp(loaded_configs, ""))
-        cflp_info("Loaded [ %s] user configs from \"~/.config/mpv/\"", loaded_configs);
+    mpv_set_option_string(mpv, "config", "yes");
 
     // Convenience options passed for slideshow mode
     if (SLIDESHOW_TIME != 0) {
@@ -982,7 +962,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
     // Need at least a output and file or playlist file
     char *playlist_opt_pointer;
     if((playlist_opt_pointer = strstr(mpv_options, "--playlist=")) != NULL) {
-        
+
         // Get file from --playlist by cutting off --playlist=, duping then cutting off the end by \n or null terminator
         char *playlist_opt = strdup(playlist_opt_pointer+strlen("--playlist="));
         video_path = strtok(playlist_opt, "\n");
