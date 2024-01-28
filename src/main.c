@@ -63,7 +63,7 @@ static mpv_handle *mpv;
 static mpv_render_context *mpv_glcontext;
 static int wakeup_pipe[2];
 static char *video_path;
-static char *mpv_options;
+static char *mpv_options = "";
 
 static struct {
     char **pauselist;
