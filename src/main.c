@@ -424,7 +424,7 @@ static void set_init_mpv_options(const struct wl_state *state) {
     }
 
     // Set mpv_options passed
-    if (mpv_options) {
+    if (strcmp(mpv_options, "") != 0) {
         // Create config file name
         char *opt_config_path = calloc(strlen("/tmp/mpvpaper.config")+1 + strlen(state->monitor)+1, sizeof(char));
         strcpy(opt_config_path, "/tmp/mpvpaper");
