@@ -11,14 +11,14 @@
 
 - ninja
 - meson
-- pkg-config
+- libmpv
 ### Clone | Build | Install:
 ```
 # Clone
 git clone --single-branch https://github.com/GhostNaN/mpvpaper
 # Build
 cd mpvpaper
-meson build --prefix=/usr/local
+meson setup build --prefix=/usr/local
 ninja -C build
 # Install
 ninja -C build install
