@@ -602,6 +602,11 @@ static void init_egl(struct wl_state *state) {
         cflp_error("Failed to load OpenGL 0x%X", eglGetError());
         exit_mpvpaper(EXIT_FAILURE);
     }
+
+    // After making EGL_NO_SURFACE current to a context
+    // Only with the Nvidia Pro drivers will set the draw buffer state to GL_NONE
+    // So we are going to force GL_BACK just like Mesa's EGL implementation
+    glDrawBuffer(GL_BACK);
 }
 
 static void destroy_display_output(struct display_output *output) {
