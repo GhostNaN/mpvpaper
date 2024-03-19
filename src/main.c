@@ -471,6 +471,9 @@ static void init_mpv(const struct wl_state *state) {
         exit_mpvpaper(EXIT_FAILURE);
     }
 
+    // Run again after mpv_initialize to override options in config files
+    set_init_mpv_options(state);
+
     // Force libmpv vo as nothing else will work
     char *vo_option = mpv_get_property_string(mpv, "options/vo");
     if (strcmp(vo_option, "libmpv") != 0 && strcmp(vo_option, "") != 0) {
