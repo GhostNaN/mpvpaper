@@ -476,8 +476,10 @@ static void init_mpv(const struct wl_state *state) {
 
     // Force libmpv vo as nothing else will work
     char *vo_option = mpv_get_property_string(mpv, "options/vo");
-    if (strcmp(vo_option, "libmpv") != 0 && strcmp(vo_option, "") != 0) {
-        cflp_warning("mpvpaper does not support any other vo than \"libmpv\"");
+    if (strcmp(vo_option, "libmpv") != 0) {
+        if (strcmp(vo_option, "") != 0) {
+            cflp_warning("mpvpaper does not support any other vo than \"libmpv\"");
+        }
         mpv_set_option_string(mpv, "vo", "libmpv");
     }
 
