@@ -517,10 +517,11 @@ static void init_mpv(const struct wl_state *state) {
     }
 
     // Load media or try loading as playlist file
-    if (strstr(mpv_options, "--playlist=") == NULL) {
+    if (strstr(video_path, "--playlist=") == NULL) {
         mpv_err = mpv_command(mpv, (const char*[]) {"loadfile", video_path, NULL});
     } else {
-        mpv_err = mpv_command(mpv, (const char*[]) {"loadlist", video_path, NULL});
+        // cut out "--playlist=" then load as a list file
+        mpv_err = mpv_command(mpv, (const char*[]) {"loadlist", video_path+strlen("--playlist="), NULL});
     }
 
     if (mpv_err < 0) {
@@ -973,9 +974,12 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
     char *playlist_opt_pointer;
     if((playlist_opt_pointer = strstr(mpv_options, "--playlist=")) != NULL) {
 
-        // Get file from --playlist by cutting off --playlist=, duping then cutting off the end by \n or null terminator
-        char *playlist_opt = strdup(playlist_opt_pointer+strlen("--playlist="));
-        video_path = strtok(playlist_opt, "\n");
+        // cut out mpv "--playlist=/my/list.txt" option from mpv_options as video_path, we will cut out "--playlist=" later
+        video_path = strtok(strdup(playlist_opt_pointer), "\n");
+
+        // remove mpv "--playlist=" option from mpv_options to avoid "The playlist option can't be used in a config file."
+        char *playlist_opt_pointer_tail = playlist_opt_pointer+strlen(video_path);
+        memmove(playlist_opt_pointer, playlist_opt_pointer_tail, strlen(playlist_opt_pointer_tail)+1);
 
         if (optind >= argc) {
             cflp_error("Not enough args passed\n"
