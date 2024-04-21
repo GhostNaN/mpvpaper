@@ -1003,7 +1003,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
 static void check_paper_processes() {
     // Check for other wallpaper process running
-    const char *other_wallpapers[] = {"swaybg", "glpaper", "hyprpaper", "wpaperd"};
+    const char *other_wallpapers[] = {"swaybg", "glpaper", "hyprpaper", "wpaperd", "swww"};
     char wallpaper_sbuffer[50] = {0};
 
     for (int i=0; i < sizeof(other_wallpapers) / sizeof(other_wallpapers[0]); i++) {
