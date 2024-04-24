@@ -265,6 +265,30 @@ typedef void (APIENTRY *EGLDEBUGPROCKHR)(EGLenum error,const char *command,EGLin
 #define EGL_GL_TEXTURE_CUBE_MAP_NEGATIVE_Z 0x30B8
 #define EGL_IMAGE_PRESERVED 0x30D2
 #define EGL_NO_IMAGE EGL_CAST(EGLImage,0)
+
+#define CASE_STR(value) case value: return #value;
+const char *eglGetErrorString(EGLint error) {
+    switch(error) {
+    CASE_STR( EGL_SUCCESS             )
+    CASE_STR( EGL_NOT_INITIALIZED     )
+    CASE_STR( EGL_BAD_ACCESS          )
+    CASE_STR( EGL_BAD_ALLOC           )
+    CASE_STR( EGL_BAD_ATTRIBUTE       )
+    CASE_STR( EGL_BAD_CONTEXT         )
+    CASE_STR( EGL_BAD_CONFIG          )
+    CASE_STR( EGL_BAD_CURRENT_SURFACE )
+    CASE_STR( EGL_BAD_DISPLAY         )
+    CASE_STR( EGL_BAD_SURFACE         )
+    CASE_STR( EGL_BAD_MATCH           )
+    CASE_STR( EGL_BAD_PARAMETER       )
+    CASE_STR( EGL_BAD_NATIVE_PIXMAP   )
+    CASE_STR( EGL_BAD_NATIVE_WINDOW   )
+    CASE_STR( EGL_CONTEXT_LOST        )
+    default: return "Unknown Error";
+    }
+}
+#undef CASE_STR
+
 EGLBoolean eglChooseConfig(EGLDisplay dpy, const EGLint *attrib_list, EGLConfig *configs, EGLint config_size, EGLint *num_config);
 EGLBoolean eglCopyBuffers(EGLDisplay dpy, EGLSurface surface, EGLNativePixmapType target);
 EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list);

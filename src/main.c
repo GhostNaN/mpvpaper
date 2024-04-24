@@ -150,7 +150,7 @@ static void render(struct display_output *output) {
     };
 
     if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context))
-        cflp_error("Failed to make output surface current 0x%X", eglGetError());
+        cflp_error("Failed to make output surface current %s", eglGetErrorString(eglGetError()));
 
     glViewport(0, 0, output->width * output->scale, output->height * output->scale);
 
@@ -166,7 +166,7 @@ static void render(struct display_output *output) {
 
     // Display frame
     if (!eglSwapBuffers(egl_display, output->egl_surface))
-        cflp_error("Failed to swap egl buffers 0x%X", eglGetError());
+        cflp_error("Failed to swap egl buffers %s", eglGetErrorString(eglGetError()));
 }
 
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t frame_time) {
@@ -554,7 +554,7 @@ static void init_egl(struct wl_state *state) {
         exit_mpvpaper(EXIT_FAILURE);
     }
     if (!eglInitialize(egl_display, NULL, NULL)) {
-        cflp_error("Failed to initialize EGL 0x%X", eglGetError());
+        cflp_error("Failed to initialize EGL %s", eglGetErrorString(eglGetError()));
         exit_mpvpaper(EXIT_FAILURE);
     }
 
@@ -570,7 +570,7 @@ static void init_egl(struct wl_state *state) {
 
     EGLint  num_config;
     if (!eglChooseConfig(egl_display, win_attrib, &egl_config, 1, &num_config)) {
-        cflp_error("Failed to set EGL frame buffer config 0x%X", eglGetError());
+        cflp_error("Failed to set EGL frame buffer config %s", eglGetErrorString(eglGetError()));
         exit_mpvpaper(EXIT_FAILURE);
     }
 
@@ -595,17 +595,17 @@ static void init_egl(struct wl_state *state) {
         }
     }
     if (!egl_context) {
-        cflp_error("Failed to create EGL context 0x%X", eglGetError());
+        cflp_error("Failed to create EGL context %s", eglGetErrorString(eglGetError()));
         exit_mpvpaper(EXIT_FAILURE);
     }
 
     if (!eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_context)) {
-        cflp_error("Failed to make context current 0x%X", eglGetError());
+        cflp_error("Failed to make context current %s", eglGetErrorString(eglGetError()));
         exit_mpvpaper(EXIT_FAILURE);
     }
 
     if (!gladLoadGLLoader((GLADloadproc)eglGetProcAddress)) {
-        cflp_error("Failed to load OpenGL 0x%X", eglGetError());
+        cflp_error("Failed to load OpenGL %s", eglGetErrorString(eglGetError()));
         exit_mpvpaper(EXIT_FAILURE);
     }
 
@@ -647,13 +647,13 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
         output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale, output->height * output->scale);
         output->egl_surface = eglCreatePlatformWindowSurface(egl_display, egl_config, output->egl_window, NULL);
         if (!output->egl_surface) {
-            cflp_error("Failed to create EGL surface for %s 0x%X", output->name, eglGetError());
+            cflp_error("Failed to create EGL surface for %s %s", output->name, eglGetErrorString(eglGetError()));
             destroy_display_output(output);
             return;
         }
 
         if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context))
-            cflp_error("Failed to make output surface current 0x%X", eglGetError());
+            cflp_error("Failed to make output surface current %s", eglGetErrorString(eglGetError()));
         eglSwapInterval(egl_display, 0);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
