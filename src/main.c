@@ -1093,26 +1093,23 @@ int main(int argc, char **argv) {
         fds[1].fd = wakeup_pipe[0];
         fds[1].events = POLLIN;
 
-        // Wait for MPV to request a new frame to be drawn
-        int poll_err = 0;
-        while (poll_err == 0) {
-            poll_err = poll(fds, sizeof(fds) / sizeof(fds[0]), 10); // 10ms timeout
-            if (poll_err == -1 && errno != EINTR)
-                break;
+        // Wait for a mpv callback or wl_display event
+        // 1ms timeout to allow for wl_display_dispatch_pending()
+        if (poll(fds, sizeof(fds) / sizeof(fds[0]), 1) == -1 && errno != EINTR)
+            break;
 
-            if (halt_info.stop_render_loop) {
-                halt_info.stop_render_loop = 0;
-                sleep(2); // Wait at least 2 secs to be killed
-            }
+        if (halt_info.stop_render_loop) {
+            halt_info.stop_render_loop = 0;
+            sleep(2); // Wait at least 2 secs to be killed
         }
 
+        // Process wl_display events
         if (fds[0].revents & POLLIN) {
             if (wl_display_dispatch(state.display) == -1)
                 break;
         } else { // Avoid frame callback getting stuck
             if (wl_display_dispatch_pending(state.display) == -1)
                 break;
-            wl_display_flush(state.display);
         }
 
         // MPV is ready to draw a new frame
