@@ -608,11 +608,6 @@ static void init_egl(struct wl_state *state) {
         cflp_error("Failed to load OpenGL %s", eglGetErrorString(eglGetError()));
         exit_mpvpaper(EXIT_FAILURE);
     }
-
-    // After making EGL_NO_SURFACE current to a context
-    // Only with the Nvidia Pro drivers will set the draw buffer state to GL_NONE
-    // So we are going to force GL_BACK just like Mesa's EGL implementation
-    glDrawBuffer(GL_BACK);
 }
 
 static void destroy_display_output(struct display_output *output) {
@@ -655,6 +650,11 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
         if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context))
             cflp_error("Failed to make output surface current %s", eglGetErrorString(eglGetError()));
         eglSwapInterval(egl_display, 0);
+
+        // After making EGL_NO_SURFACE current to a context
+        // Only with the Nvidia Pro drivers will set the draw buffer state to GL_NONE
+        // So we are going to force GL_BACK just like Mesa's EGL implementation
+        glDrawBuffer(GL_BACK);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
