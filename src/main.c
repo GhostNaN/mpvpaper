@@ -1108,6 +1108,10 @@ int main(int argc, char **argv) {
         if (fds[0].revents & POLLIN) {
             if (wl_display_dispatch(state.display) == -1)
                 break;
+        } else {
+            if (wl_display_dispatch_pending(state.display) == -1)
+                break;
+            wl_display_flush(state.display);
         }
 
         // MPV is ready to draw a new frame
