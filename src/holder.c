@@ -1,15 +1,15 @@
 #include <fcntl.h>
 #include <getopt.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
-#include <wayland-client.h>
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include <wayland-client.h>
 
 typedef unsigned int uint;
 
@@ -18,8 +18,8 @@ struct wl_state {
     struct wl_compositor *compositor;
     struct wl_shm *shm;
     struct zwlr_layer_shell_v1 *layer_shell;
-    struct wl_list outputs;  // struct display_output::link
-    char* monitor; // User selected output
+    struct wl_list outputs; // struct display_output::link
+    char *monitor; // User selected output
 };
 
 struct display_output {
@@ -215,14 +215,15 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
 static const struct wl_output_listener output_listener = {
     .geometry = nop,
-	.mode = nop,
-	.done = output_done,
-	.scale = nop,
-	.name = output_name,
-	.description = nop,
+    .mode = nop,
+    .done = output_done,
+    .scale = nop,
+    .name = output_name,
+    .description = nop,
 };
 
-static void handle_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version) {
+static void handle_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface,
+        uint32_t version) {
     (void)version;
 
     struct wl_state *state = data;
@@ -261,10 +262,10 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = handle_global_remove,
 };
 
-static void copy_argv(int argc, char* argv[]) {
+static void copy_argv(int argc, char *argv[]) {
     halt_info.argv_copy = calloc(argc+1, sizeof(char*));
 
-    for (int i = 0; i < argc; i++) {
+    for (int i=0; i < argc; i++) {
         halt_info.argv_copy[i] = strdup(argv[i]);
     }
 }
@@ -304,7 +305,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         {"slideshow", required_argument, NULL, 'n'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
-        {0, 0, 0, 0}};
+        {0, 0, 0, 0}
+    };
 
     const char *usage =
         "Usage: mpvpaper-holder <mpvpaper options>\n"
@@ -369,9 +371,7 @@ int main(int argc, char **argv) {
     }
 
     struct display_output *output, *tmp_output;
-    wl_list_for_each_safe(output, tmp_output, &state.outputs, link) {
-        destroy_display_output(output);
-    }
+    wl_list_for_each_safe(output, tmp_output, &state.outputs, link) { destroy_display_output(output); }
 
     return EXIT_SUCCESS;
 }
