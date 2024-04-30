@@ -204,8 +204,12 @@ static void stop_mpvpaper() {
     snprintf(save_info, sizeof(save_info), "%s %s", time_pos, playlist_pos);
 
     char **new_argv = calloc(halt_info.argc + 3, sizeof(char *)); // Plus 3 for adding in -Z
+    if (!new_argv) {
+        cflp_error("Failed to allocate new argv");
+        exit(EXIT_FAILURE);
+    }
 
-    int i;
+    uint i = 0;
     for (i=0; i < halt_info.argc; i++) {
         new_argv[i] = strdup(halt_info.argv_copy[i]);
     }
@@ -249,9 +253,7 @@ static char *check_watch_list(char **list) {
     char pid_name[512] = {0};
 
     for (uint i=0; list[i] != NULL; i++) {
-        strcpy(pid_name, "pidof ");
-        strcat(pid_name, list[i]);
-        strcat(pid_name, " > /dev/null");
+        snprintf(pid_name, sizeof(pid_name), "pidof %s > /dev/null", list[i]);
 
         // Stop if program is open
         if (!system(pid_name))
@@ -428,10 +430,12 @@ static void set_init_mpv_options(const struct wl_state *state) {
     // Set mpv_options passed
     if (strcmp(mpv_options, "") != 0) {
         // Create config file name
-        char *opt_config_path = calloc(strlen("/tmp/mpvpaper.config")+1 + strlen(state->monitor)+1, sizeof(char));
-        strcpy(opt_config_path, "/tmp/mpvpaper");
-        strcat(opt_config_path, state->monitor);
-        strcat(opt_config_path, ".config");
+        char *opt_config_path = NULL;
+        if (asprintf(&opt_config_path, "/tmp/mpvpaper_%s.config", state->monitor) < 0) {
+            cflp_error("Failed to create file path for mpv options config");
+            exit_mpvpaper(EXIT_FAILURE);
+        }
+
         // Put options into config file
         FILE *file = fopen(opt_config_path, "w");
         fputs(mpv_options, file);
@@ -808,16 +812,21 @@ static char **get_watch_list(char *path_name) {
 
     FILE *file = fopen(path_name, "r");
     if (file) {
-        // Get alloc size
-        fseek(file, 0L, SEEK_END);
-        char **list = calloc(ftell(file)+1, sizeof(char));
-        rewind(file);
-
-        // Read lines
+        // Dynamically realloc for each program added to list
         char app[512];
-        for (uint i=0; fscanf(file, "%s", app) == 1; i++) {
+        char **list = NULL;
+        uint i = 0;
+        for (i=0; fscanf(file, "%511s", app) != EOF; i++) {
+            list = realloc(list, (i+1) * sizeof(char *));
+            if (!list) {
+                cflp_error("Failed to reallocate watch list");
+                exit(EXIT_FAILURE);
+            }
             list[i] = strdup(app);
         }
+        // Null terminate
+        list = realloc(list, (i+1) * sizeof(char *));
+        list[i] = NULL;
 
         fclose(file);
         // If any app found
@@ -830,6 +839,10 @@ static char **get_watch_list(char *path_name) {
 static void copy_argv(int argc, char *argv[]) {
     halt_info.argc = argc;
     halt_info.argv_copy = calloc(argc+1, sizeof(char *));
+    if (!halt_info.argv_copy) {
+        cflp_error("Failed to allocate argv copy");
+        exit(EXIT_FAILURE);
+    }
 
     int j = 0;
     for (int i=0; i < argc; i++) {
@@ -846,15 +859,19 @@ static void copy_argv(int argc, char *argv[]) {
 static void set_watch_lists() {
     const char *home_dir = getenv("HOME");
 
-    char *pause_path = calloc(strlen(home_dir)+1 + strlen("/.config/mpvpaper/pauselist")+1, sizeof(char));
-    strcpy(pause_path, home_dir);
-    strcat(pause_path, "/.config/mpvpaper/pauselist");
+    char *pause_path = NULL;
+    if (asprintf(&pause_path, "%s/.config/mpvpaper/pauselist", home_dir) < 0) {
+        cflp_error("Failed to create file path for pauselist");
+        exit(EXIT_FAILURE);
+    }
     halt_info.pauselist = get_watch_list(pause_path);
     free(pause_path);
 
-    char *stop_path = calloc(strlen(home_dir)+1 + strlen("/.config/mpvpaper/stoplist")+1, sizeof(char));
-    strcpy(stop_path, home_dir);
-    strcat(stop_path, "/.config/mpvpaper/stoplist");
+    char *stop_path = NULL;
+    if (asprintf(&stop_path, "%s/.config/mpvpaper/stoplist", home_dir) < 0) {
+        cflp_error("Failed to create file path for stoplist");
+        exit(EXIT_FAILURE);
+    }
     halt_info.stoplist = get_watch_list(stop_path);
     free(stop_path);
 
@@ -1006,13 +1023,10 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 static void check_paper_processes() {
     // Check for other wallpaper process running
     const char *other_wallpapers[] = {"swaybg", "glpaper", "hyprpaper", "wpaperd", "swww-daemon"};
-    char wallpaper_sbuffer[50] = {0};
+    char wallpaper_sbuffer[64] = {0};
 
     for (int i=0; i < sizeof(other_wallpapers) / sizeof(other_wallpapers[0]); i++) {
-
-        strcpy(wallpaper_sbuffer, "pidof ");
-        strcat(wallpaper_sbuffer, other_wallpapers[i]);
-        strcat(wallpaper_sbuffer, " > /dev/null");
+        snprintf(wallpaper_sbuffer, sizeof(wallpaper_sbuffer), "pidof %s > /dev/null", other_wallpapers[i]);
 
         if (!system(wallpaper_sbuffer))
             cflp_warning("%s is running. This may block mpvpaper from being seen.", other_wallpapers[i]);

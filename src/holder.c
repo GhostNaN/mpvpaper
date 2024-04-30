@@ -85,7 +85,10 @@ static struct wl_buffer *create_dummy_buffer(struct display_output *output) {
     shm_unlink(SHM_NAME);
     int fd = shm_open(SHM_NAME, O_RDWR | O_CREAT | O_EXCL, 0600);
     shm_unlink(SHM_NAME);
-    ftruncate(fd, size);
+    if (ftruncate(fd, size) < 0) {
+        fprintf(stderr, "Failed to truncate shm");
+        exit(EXIT_FAILURE);
+    }
 
     struct wl_shm_pool *pool = wl_shm_create_pool(output->state->shm, fd, size);
     struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, WIDTH, HEIGHT, stride, WL_SHM_FORMAT_XRGB8888);
@@ -264,6 +267,10 @@ static const struct wl_registry_listener registry_listener = {
 
 static void copy_argv(int argc, char *argv[]) {
     halt_info.argv_copy = calloc(argc+1, sizeof(char*));
+    if (!halt_info.argv_copy) {
+        fprintf(stderr, "Failed to allocate argv copy");
+        exit(EXIT_FAILURE);
+    }
 
     for (int i=0; i < argc; i++) {
         halt_info.argv_copy[i] = strdup(argv[i]);
@@ -272,22 +279,30 @@ static void copy_argv(int argc, char *argv[]) {
 
 static void set_stop_list() {
 
-    char *stop_path = calloc(strlen(getenv("HOME"))+1 + strlen("/.config/mpvpaper/stoplist")+1, sizeof(char));
-    strcpy(stop_path, getenv("HOME"));
-    strcat(stop_path, "/.config/mpvpaper/stoplist");
+    char *stop_path = NULL;
+    if (asprintf(&stop_path, "%s/.config/mpvpaper/stoplist", getenv("HOME")) < 0) {
+        fprintf(stderr, "Failed to create file path for stoplist");
+        exit(EXIT_FAILURE);
+    }
 
     FILE *file = fopen(stop_path, "r");
     if (file) {
-        // Get alloc size
-        fseek(file, 0L, SEEK_END);
-        halt_info.stoplist = calloc(ftell(file)+1, sizeof(char));
-        rewind(file);
 
-        // Read lines
+        // Dynamically realloc for each program added to list
         char app[512];
-        for (uint i=0; fscanf(file, "%s", app) == 1; i++) {
-            halt_info.stoplist[i] = strdup(app);
+        halt_info.stoplist = NULL;
+        uint i = 0;
+        for (i=0; fscanf(file, "%511s", app) != EOF; i++) {
+            halt_info.stoplist = realloc(halt_info.stoplist, (i+1) * sizeof(char *));
+            if (!halt_info.stoplist) {
+                fprintf(stderr, "Failed to reallocate stop list");
+                exit(EXIT_FAILURE);
+            }
+            halt_info.stoplist [i] = strdup(app);
         }
+        // Null terminate
+        halt_info.stoplist  = realloc(halt_info.stoplist , (i+1) * sizeof(char *));
+        halt_info.stoplist [i] = NULL;
 
         free(stop_path);
         fclose(file);
