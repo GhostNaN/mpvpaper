@@ -61,11 +61,11 @@ static void revive_mpvpaper() {
 }
 
 static void check_stoplist() {
+
+    char pid_name[512] = {0};
+
     for (uint i=0; halt_info.stoplist[i] != NULL; i++) {
-        char pid_name[512] = {0};
-        strcpy(pid_name, "pidof ");
-        strcat(pid_name, halt_info.stoplist[i]);
-        strcat(pid_name, " > /dev/null");
+        snprintf(pid_name, sizeof(pid_name), "pidof %s > /dev/null", halt_info.stoplist[i]);
 
         while (!system(pid_name))
             usleep(100000); // 0.1 sec
@@ -115,7 +115,6 @@ static void create_surface_frame(struct display_output *output) {
 }
 
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t frame_time) {
-    (void)frame_time;
     wl_callback_destroy(callback);
 
     if (halt_info.stoplist) {
@@ -190,11 +189,11 @@ static void create_layer_surface(struct display_output *output) {
         ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
         ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
         ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT
+    );
     zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, -1);
     zwlr_layer_surface_v1_add_listener(output->layer_surface, &layer_surface_listener, output);
     wl_surface_commit(output->surface);
-
 }
 
 static void output_name(void *data, struct wl_output *wl_output, const char *name) {
@@ -209,7 +208,7 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
     struct display_output *output = data;
 
-    bool name_ok = (strcmp(output->name, output->state->monitor) == 0) || (strcmp(output->state->monitor, "*") == 0);
+    bool name_ok = (strstr(output->state->monitor, output->name) != NULL) || (strcmp(output->state->monitor, "*") == 0);
     if (name_ok && !output->layer_surface)
         create_layer_surface(output);
     if (!name_ok)
@@ -313,6 +312,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
     static struct option long_options[] = {
         {"help", no_argument, NULL, 'h'},
+        {"help-output", no_argument, NULL, 'd'},
         {"verbose", no_argument, NULL, 'v'},
         {"fork", no_argument, NULL, 'f'},
         {"auto-pause", no_argument, NULL, 'p'},
@@ -335,8 +335,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "- Set with \"-s\" or \"--auto-stop\" mpvpaper option\n";
 
 
-    char opt;
-    while ((opt = getopt_long(argc, argv, "hvfpsn:l:o:Z:", long_options, NULL)) != -1) {
+    int opt;
+    while ((opt = getopt_long(argc, argv, "hdvfpsn:l:o:Z:", long_options, NULL)) != -1) {
 
         switch (opt) {
             case 'h':
@@ -348,7 +348,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         }
     }
 
-    // Need at least a output
+    // Need at least an output
     if (optind >= argc) {
         fprintf(stderr, "%s", usage);
         exit(EXIT_FAILURE);
