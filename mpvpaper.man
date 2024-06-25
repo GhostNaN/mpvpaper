@@ -52,6 +52,14 @@ Simple example:
 mpvpaper DP-2 /path/to/video
 .RE
 
+You can select the output with either a connection or identifier names:
+.RS
+mpvpaper 'DP-2 DP-1 HDMI-A-1' /path/to/video
+.RE
+.RS
+mpvpaper 'Acer Technologies Acer H236HL LX1AA12341234' /path/to/video
+.RE
+
 To play the same video on all outputs:
 .RS
 mpvpaper '*' /path/to/video
@@ -136,8 +144,7 @@ Both in terms of time position and playlist position(if not shuffled)
 \(bu There is a small time delay(1-2 secs.) with the automagic options
 as it uses time to calculate when to act
     
-\(bu mpv user configs are loaded from 
-.I ~/.config/mpv/
+\(bu mpv user configs are loaded by default
 
 .RE
 
