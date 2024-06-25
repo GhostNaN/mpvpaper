@@ -431,7 +431,8 @@ static void set_init_mpv_options(const struct wl_state *state) {
     if (strcmp(mpv_options, "") != 0) {
         // Create config file name
         char *opt_config_path = NULL;
-        if (asprintf(&opt_config_path, "/tmp/mpvpaper_%s.config", state->monitor) < 0) {
+        // Use getpid() to avoid possible race condition with another mpvpaper instance running
+        if (asprintf(&opt_config_path, "/tmp/mpvpaper_%d.config", getpid()) < 0) {
             cflp_error("Failed to create file path for mpv options config");
             exit_mpvpaper(EXIT_FAILURE);
         }
@@ -721,15 +722,17 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
     struct display_output *output = data;
 
-    bool name_ok = (strstr(output->state->monitor, output->name) != NULL) || (strcmp(output->state->monitor, "*") == 0);
+    bool name_ok = (strstr(output->state->monitor, output->name) != NULL) ||
+            (strstr(output->state->monitor, output->identifier) != NULL) ||
+            (strcmp(output->state->monitor, "*") == 0);
     if (name_ok && !output->layer_surface) {
         if (VERBOSE)
             cflp_info("Output %s (%s) selected", output->name, output->identifier);
         create_layer_surface(output);
     }
-    if (!name_ok) {
+    if (!name_ok || (strcmp(output->state->monitor, "") == 0)) {
         if (SHOW_OUTPUTS)
-            cflp_info("Output %s (%s) found", output->name, output->identifier);
+            cflp_info("Output: %s  Identifier: %s", output->name, output->identifier);
         destroy_display_output(output);
     }
 }
@@ -745,6 +748,7 @@ static void output_description(void *data, struct wl_output *wl_output, const ch
     struct display_output *output = data;
 
     // wlroots currently sets the description to `make model serial (name)`
+    // Having `(name)` is redundant and must be removed to have a clean identifier.
     // If this changes in the future, this will need to be modified.
     char *paren = strrchr(description, '(');
     if (paren) {
@@ -756,6 +760,8 @@ static void output_description(void *data, struct wl_output *wl_output, const ch
         }
         strncpy(output->identifier, description, length);
         output->identifier[length - 1] = '\0';
+    } else {
+        output->identifier = strdup(description);
     }
 }
 

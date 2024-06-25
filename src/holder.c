@@ -26,6 +26,7 @@ struct display_output {
     uint32_t wl_name;
     struct wl_output *wl_output;
     char *name;
+    char *identifier;
 
     struct wl_state *state;
     struct wl_surface *surface;
@@ -208,11 +209,29 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
     struct display_output *output = data;
 
-    bool name_ok = (strstr(output->state->monitor, output->name) != NULL) || (strcmp(output->state->monitor, "*") == 0);
+    bool name_ok = (strstr(output->state->monitor, output->name) != NULL) ||
+            (strstr(output->state->monitor, output->identifier) != NULL) ||
+            (strcmp(output->state->monitor, "*") == 0);
     if (name_ok && !output->layer_surface)
         create_layer_surface(output);
     if (!name_ok)
         destroy_display_output(output);
+}
+
+static void output_description(void *data, struct wl_output *wl_output, const char *description) {
+    (void)wl_output;
+
+    struct display_output *output = data;
+
+    char *paren = strrchr(description, '(');
+    if (paren) {
+        size_t length = paren - description;
+        output->identifier = calloc(length, sizeof(char));
+        strncpy(output->identifier, description, length);
+        output->identifier[length - 1] = '\0';
+    } else {
+        output->identifier = strdup(description);
+    }
 }
 
 static const struct wl_output_listener output_listener = {
@@ -221,7 +240,7 @@ static const struct wl_output_listener output_listener = {
     .done = output_done,
     .scale = nop,
     .name = output_name,
-    .description = nop,
+    .description = output_description,
 };
 
 static void handle_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface,
