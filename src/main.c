@@ -1113,10 +1113,14 @@ int main(int argc, char **argv) {
         fds[1].fd = wakeup_pipe[0];
         fds[1].events = POLLIN;
 
-        // Wait for a mpv callback or wl_display event
-        // 1ms timeout to allow for wl_display_dispatch_pending()
-        if (poll(fds, sizeof(fds) / sizeof(fds[0]), 1) == -1 && errno != EINTR)
-            break;
+        // We first make sure to call wl_display_prepare_read() before poll() to avoid deadlock
+        if (wl_display_prepare_read(state.display) == 0) {
+            // Wait for a mpv callback or wl_display event
+            if (poll(fds, sizeof(fds) / sizeof(fds[0]), -1) == -1 && errno != EINTR)
+                break;
+            // Give back the fd by canceling for wl_display_prepare_read()
+            wl_display_cancel_read(state.display);
+        }
 
         if (halt_info.stop_render_loop) {
             halt_info.stop_render_loop = 0;
