@@ -1104,36 +1104,39 @@ int main(int argc, char **argv) {
 
     // Main Loop
     while (true) {
-        if (wl_display_flush(state.display) == -1 && errno != EAGAIN)
-            break;
-
         struct pollfd fds[2];
         fds[0].fd = wl_display_get_fd(state.display);
         fds[0].events = POLLIN;
         fds[1].fd = wakeup_pipe[0];
         fds[1].events = POLLIN;
 
-        // We first make sure to call wl_display_prepare_read() before poll() to avoid deadlock
-        if (wl_display_prepare_read(state.display) == 0) {
-            // Wait for a mpv callback or wl_display event
-            if (poll(fds, sizeof(fds) / sizeof(fds[0]), -1) == -1 && errno != EINTR)
-                break;
-            // Give back the fd by canceling for wl_display_prepare_read()
-            wl_display_cancel_read(state.display);
+        // First make sure to call wl_display_prepare_read() before poll() to avoid deadlock
+        int wl_display_prepare_read_state = wl_display_prepare_read(state.display);
+
+        // Next flush just before poll()
+        if (wl_display_flush(state.display) == -1 && errno != EAGAIN)
+            break;
+
+        // Wait for a mpv callback or wl_display event
+        if (poll(fds, sizeof(fds) / sizeof(fds[0]), -1) == -1 && errno != EINTR)
+            break;
+
+        // If wl_display_prepare_read() was successful as 0
+        if (wl_display_prepare_read_state == 0) {
+            // Read if we have wl_display events after poll()
+            if (fds[0].revents & POLLIN) {
+                wl_display_read_events(state.display);
+            } else { // Otherwise we must cancel the read
+                wl_display_cancel_read(state.display);
+            }
         }
+        // Lastly process wl_display events without blocking
+        if (wl_display_dispatch_pending(state.display) == -1)
+            break;
 
         if (halt_info.stop_render_loop) {
             halt_info.stop_render_loop = 0;
             sleep(2); // Wait at least 2 secs to be killed
-        }
-
-        // Process wl_display events
-        if (fds[0].revents & POLLIN) {
-            if (wl_display_dispatch(state.display) == -1)
-                break;
-        } else { // Avoid frame callback getting stuck
-            if (wl_display_dispatch_pending(state.display) == -1)
-                break;
         }
 
         // MPV is ready to draw a new frame
