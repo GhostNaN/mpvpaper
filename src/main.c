@@ -1118,7 +1118,7 @@ int main(int argc, char **argv) {
             break;
 
         // Wait for a mpv callback or wl_display event
-        if (poll(fds, sizeof(fds) / sizeof(fds[0]), -1) == -1 && errno != EINTR)
+        if (poll(fds, sizeof(fds) / sizeof(fds[0]), 50) == -1 && errno != EINTR)
             break;
 
         // If wl_display_prepare_read() was successful as 0
