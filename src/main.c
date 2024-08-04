@@ -949,11 +949,19 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 break;
             case 'p':
                 halt_info.auto_pause = 1;
-                halt_info.auto_stop = 0;
+
+                if (halt_info.auto_stop) {
+                    cflp_warning("You cannot use auto-stop and auto-pause together");
+                    halt_info.auto_stop = 0;
+                }
                 break;
             case 's':
                 halt_info.auto_stop = 1;
-                halt_info.auto_pause = 0;
+
+                if (halt_info.auto_pause) {
+                    cflp_warning("You cannot use auto-pause and auto-stop together");
+                    halt_info.auto_pause = 0;
+                }
                 break;
             case 'n':
                 SLIDESHOW_TIME = atoi(optarg);
