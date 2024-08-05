@@ -921,7 +921,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "--layer        -l LAYER        Specifies shell surface layer to run on (background by default)\n"
         "--mpv-options  -o \"OPTIONS\"    Forwards mpv options (Must be within quotes\"\")\n"
         "\n"
-        "* See man page for more details\n";
+        "* The auto options might not work as intended\n"
+        "See the man page for more details\n";
 
     char *layer_name;
 

@@ -124,6 +124,11 @@ This is the magic behind the automagic pause/stop options.
 Whatever "hidden" means is up to compositor. As for Sway, "hidden" is if there is a fullscreen window
 in the way of the wallpaper. mpvpaper will still draw/render even if there is a normal window
 blocking the wallpaper view entirely.
+.P
+This feature is at best a hack that works on some compositors.
+Usability of these auto options will vary and may not work as intended or at all.
+In such a case, other features like the "watch lists" mentioned above should be used instead.
+
 .RE
 
 **More on lists:
