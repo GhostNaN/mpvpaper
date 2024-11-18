@@ -724,7 +724,12 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
     bool name_ok = (strstr(output->state->monitor, output->name) != NULL) ||
             (strlen(output->identifier) != 0 && strstr(output->state->monitor, output->identifier) != NULL) ||
-            (strcmp(output->state->monitor, "*") == 0);
+            // Keep for legacy reasons
+            (strcmp(output->state->monitor, "*") == 0) ||
+            // Let's just cover all cases here
+            (strcmp(output->state->monitor, "ALL") == 0) ||
+            (strcmp(output->state->monitor, "All") == 0) ||
+            (strcmp(output->state->monitor, "all") == 0);
     if (name_ok && !output->layer_surface) {
         if (VERBOSE)
             cflp_info("Output %s (%s) selected", output->name, output->identifier);

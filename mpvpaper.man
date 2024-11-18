@@ -1,4 +1,4 @@
-.TH MPVPAPER 1 "September 2022" "mpvpaper 1.3" "User Manual"
+.TH MPVPAPER 1 "August 2024" "mpvpaper 1.7" "User Manual"
 .SH NAME
 mpvpaper \- video wallpaper player using mpv for wlroots
 .SH SYNOPSIS
@@ -62,7 +62,7 @@ mpvpaper 'Acer Technologies Acer H236HL LX1AA12341234' /path/to/video
 
 To play the same video on all outputs:
 .RS
-mpvpaper '*' /path/to/video
+mpvpaper ALL /path/to/video
 .RE
 
 Forward mpv options by passing "--mpv-options" or "-o" like so:

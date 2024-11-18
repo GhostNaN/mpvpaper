@@ -211,7 +211,10 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
     bool name_ok = (strstr(output->state->monitor, output->name) != NULL) ||
             (strstr(output->state->monitor, output->identifier) != NULL) ||
-            (strcmp(output->state->monitor, "*") == 0);
+            (strcmp(output->state->monitor, "*") == 0) ||
+            (strcmp(output->state->monitor, "ALL") == 0) ||
+            (strcmp(output->state->monitor, "All") == 0) ||
+            (strcmp(output->state->monitor, "all") == 0);
     if (name_ok && !output->layer_surface)
         create_layer_surface(output);
     if (!name_ok)
