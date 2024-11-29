@@ -88,8 +88,6 @@ static uint SLIDESHOW_TIME = 0;
 static bool SHOW_OUTPUTS = false;
 static int VERBOSE = 0;
 
-static void nop() {}
-
 static void exit_cleanup() {
 
     // Give mpv a chance to finish
@@ -123,7 +121,7 @@ static void exit_mpvpaper(int reason) {
     exit(reason);
 }
 
-static void *exit_by_pthread() {
+static void *exit_by_pthread(void *_) {
     exit_mpvpaper(EXIT_SUCCESS);
     pthread_exit(NULL);
 }
@@ -262,7 +260,7 @@ static char *check_watch_list(char **list) {
     return NULL;
 }
 
-static void *monitor_pauselist() {
+static void *monitor_pauselist(void *_) {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
     bool list_paused = 0;
 
@@ -286,7 +284,7 @@ static void *monitor_pauselist() {
     pthread_exit(NULL);
 }
 
-static void *monitor_stoplist() {
+static void *monitor_stoplist(void *_) {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
     while (halt_info.stoplist) {
@@ -303,7 +301,7 @@ static void *monitor_stoplist() {
     pthread_exit(NULL);
 }
 
-static void *handle_auto_pause() {
+static void *handle_auto_pause(void *_) {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
     while (halt_info.auto_pause) {
@@ -327,7 +325,7 @@ static void *handle_auto_pause() {
     pthread_exit(NULL);
 }
 
-static void *handle_auto_stop() {
+static void *handle_auto_stop(void *_) {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
     while (halt_info.auto_stop) {
@@ -344,7 +342,7 @@ static void *handle_auto_stop() {
     pthread_exit(NULL);
 }
 
-static void *handle_mpv_events() {
+static void *handle_mpv_events(void *_) {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
     int mpv_paused = 0;
     time_t start_time = time(NULL);
@@ -710,6 +708,16 @@ static void create_layer_surface(struct display_output *output) {
     wl_surface_commit(output->surface);
 }
 
+static void output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width,
+        int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) {
+    // NOP
+}
+
+static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height,
+        int32_t refresh) {
+    // NOP
+}
+
 static void output_name(void *data, struct wl_output *wl_output, const char *name) {
     (void)wl_output;
 
@@ -771,8 +779,8 @@ static void output_description(void *data, struct wl_output *wl_output, const ch
 }
 
 static const struct wl_output_listener output_listener = {
-    .geometry = nop,
-    .mode = nop,
+    .geometry = output_geometry,
+    .mode = output_mode,
     .done = output_done,
     .scale = output_scale,
     .name = output_name,

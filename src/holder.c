@@ -45,8 +45,6 @@ static struct {
     int start_time;
 } halt_info = {NULL, NULL, false, 0};
 
-static void nop() {}
-
 static void revive_mpvpaper() {
     // Get the "real" cwd
     char exe_dir[1024];
@@ -197,6 +195,16 @@ static void create_layer_surface(struct display_output *output) {
     wl_surface_commit(output->surface);
 }
 
+static void output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width,
+        int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) {
+    // NOP
+}
+
+static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height,
+        int32_t refresh) {
+    // NOP
+}
+
 static void output_name(void *data, struct wl_output *wl_output, const char *name) {
     (void)wl_output;
 
@@ -221,6 +229,10 @@ static void output_done(void *data, struct wl_output *wl_output) {
         destroy_display_output(output);
 }
 
+static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
+    // NOP
+}
+
 static void output_description(void *data, struct wl_output *wl_output, const char *description) {
     (void)wl_output;
 
@@ -238,10 +250,10 @@ static void output_description(void *data, struct wl_output *wl_output, const ch
 }
 
 static const struct wl_output_listener output_listener = {
-    .geometry = nop,
-    .mode = nop,
+    .geometry = output_geometry,
+    .mode = output_mode,
     .done = output_done,
-    .scale = nop,
+    .scale = output_scale,
     .name = output_name,
     .description = output_description,
 };
