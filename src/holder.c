@@ -205,13 +205,6 @@ static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags,
     // NOP
 }
 
-static void output_name(void *data, struct wl_output *wl_output, const char *name) {
-    (void)wl_output;
-
-    struct display_output *output = data;
-    output->name = strdup(name);
-}
-
 static void output_done(void *data, struct wl_output *wl_output) {
     (void)wl_output;
 
@@ -231,6 +224,13 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
 static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
     // NOP
+}
+
+static void output_name(void *data, struct wl_output *wl_output, const char *name) {
+    (void)wl_output;
+
+    struct display_output *output = data;
+    output->name = strdup(name);
 }
 
 static void output_description(void *data, struct wl_output *wl_output, const char *description) {
