@@ -15,7 +15,7 @@ scanner_client_header=generator(scanner,output: '@BASENAME@-client-protocol.h',a
 
 protocols_src=[
   scanner_private_code.process('proto/wlr-layer-shell-unstable-v1.xml'),
-  scanner_private_code.process(wl_protocols.get_pkgconfig_variable('pkgdatadir')+'/stable/xdg-shell/xdg-shell.xml')
+  scanner_private_code.process(wl_protocols.get_variable(pkgconfig: 'pkgdatadir')+'/stable/xdg-shell/xdg-shell.xml')
 ]
 
 protocols_headers=[

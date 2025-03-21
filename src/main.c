@@ -619,14 +619,19 @@ static void destroy_display_output(struct display_output *output) {
     if (!output)
         return;
     wl_list_remove(&output->link);
+    if (output->egl_surface) {
+        eglDestroySurface(egl_display, output->egl_surface);
+        if (egl_context) {
+            eglDestroyContext(egl_display, egl_context);
+            egl_context = NULL;
+        }
+    }
+    if (output->egl_window)
+        wl_egl_window_destroy(output->egl_window);
     if (output->layer_surface != NULL)
         zwlr_layer_surface_v1_destroy(output->layer_surface);
     if (output->surface != NULL)
         wl_surface_destroy(output->surface);
-    if (output->egl_surface)
-        eglDestroySurface(egl_display, output->egl_surface);
-    if (output->egl_window)
-        wl_egl_window_destroy(output->egl_window);
     wl_output_destroy(output->wl_output);
 
     free(output->name);
@@ -642,6 +647,11 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     output->height = height;
     zwlr_layer_surface_v1_ack_configure(surface, serial);
     wl_surface_set_buffer_scale(output->surface, output->scale);
+
+    if (!egl_context) {
+        init_egl(output->state);
+        init_mpv(output->state);
+    }
 
     if (!output->egl_window) {
         output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale,
