@@ -418,6 +418,9 @@ static void set_init_mpv_options(const struct wl_state *state) {
     mpv_set_option_string(mpv, "input-terminal", "yes");
     mpv_set_option_string(mpv, "terminal", "yes");
     mpv_set_option_string(mpv, "config", "yes");
+    // Set Background to be Transparent
+    mpv_set_option_string(mpv, "background", "none");
+    mpv_set_option_string(mpv, "background-color", "#00000000");
 
     // Convenience options passed for slideshow mode
     if (SLIDESHOW_TIME != 0) {
@@ -570,6 +573,7 @@ static void init_egl(struct wl_state *state) {
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
         EGL_BLUE_SIZE, 8,
+        EGL_ALPHA_SIZE, 8,
         EGL_NONE
     };
 
@@ -662,7 +666,7 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
         // So we are going to force GL_BACK just like Mesa's EGL implementation
         glDrawBuffer(GL_BACK);
 
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
         // Start render loop
         render(output);
