@@ -418,8 +418,6 @@ static void set_init_mpv_options(const struct wl_state *state) {
     mpv_set_option_string(mpv, "input-terminal", "yes");
     mpv_set_option_string(mpv, "terminal", "yes");
     mpv_set_option_string(mpv, "config", "yes");
-    // Set Background to be Transparent
-    mpv_set_option_string(mpv, "background", "none");
     mpv_set_option_string(mpv, "background-color", "#00000000");
 
     // Convenience options passed for slideshow mode
