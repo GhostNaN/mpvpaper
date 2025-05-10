@@ -30,7 +30,7 @@ mpvpaper DP-2 /path/to/video
 ```
 To play the same video on all outputs:
 ```
-mpvpaper '*' /path/to/video
+mpvpaper ALL /path/to/video
 ```
 You can also forward mpv options by passing "--mpv-options" or "-o" like so:
 ```
