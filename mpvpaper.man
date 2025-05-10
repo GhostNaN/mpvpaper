@@ -1,4 +1,4 @@
-.TH MPVPAPER 1 "August 2024" "mpvpaper 1.7" "User Manual"
+.TH MPVPAPER 1 "May 2025" "mpvpaper 1.8" "User Manual"
 .SH NAME
 mpvpaper \- video wallpaper player using mpv for wlroots
 .SH SYNOPSIS
