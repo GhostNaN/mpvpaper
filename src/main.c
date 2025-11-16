@@ -10,6 +10,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/eventfd.h>
 
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include <wayland-client.h>
@@ -61,7 +62,7 @@ static EGLContext *egl_context;
 
 static mpv_handle *mpv;
 static mpv_render_context *mpv_glcontext;
-static int wakeup_pipe[2];
+static int wakeup_fd;
 static char *video_path;
 static char *mpv_options = "";
 
@@ -112,6 +113,9 @@ static void exit_cleanup() {
 
     if (egl_context)
         eglDestroyContext(egl_display, egl_context);
+
+    if (wakeup_fd >= 0)
+        close(wakeup_fd);
 }
 
 static void exit_mpvpaper(int reason) {
@@ -454,10 +458,8 @@ static void *get_proc_address_mpv(void *ctx, const char *name) {
 
 static void render_update_callback(void *callback_ctx) {
     (void)callback_ctx;
-    uint8_t tmp = 0;
-
-    if (write(wakeup_pipe[1], &tmp, 1) == -1)
-        exit_mpvpaper(EXIT_FAILURE);
+    uint64_t inc = 1;
+    (void)write(wakeup_fd, &inc, sizeof(inc));
 }
 
 static void init_mpv(const struct wl_state *state) {
@@ -1078,13 +1080,12 @@ int main(int argc, char **argv) {
     if (halt_info.auto_stop || halt_info.stoplist)
         copy_argv(argc, argv);
 
-    // Create pipe for checking render_update_callback()
-    if (pipe(wakeup_pipe) == -1) {
-        cflp_error("Creating a self-pipe failed.");
+    // Create eventfd for checking render_update_callback()
+    wakeup_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE);
+    if (wakeup_fd == -1) {
+        cflp_error("Creating eventfd failed.");
         return EXIT_FAILURE;
     }
-    fcntl(wakeup_pipe[0], F_SETFD, FD_CLOEXEC);
-    fcntl(wakeup_pipe[1], F_SETFD, FD_CLOEXEC);
 
     // Connect to Wayland compositor
     state.display = wl_display_connect(NULL);
@@ -1131,7 +1132,7 @@ int main(int argc, char **argv) {
         struct pollfd fds[2];
         fds[0].fd = wl_display_get_fd(state.display);
         fds[0].events = POLLIN;
-        fds[1].fd = wakeup_pipe[0];
+        fds[1].fd = wakeup_fd;
         fds[1].events = POLLIN;
 
         // First make sure to call wl_display_prepare_read() before poll() to avoid deadlock
@@ -1141,8 +1142,8 @@ int main(int argc, char **argv) {
         if (wl_display_flush(state.display) == -1 && errno != EAGAIN)
             break;
 
-        // Wait for a mpv callback or wl_display event
-        if (poll(fds, sizeof(fds) / sizeof(fds[0]), 50) == -1 && errno != EINTR)
+        // Wait for a mpv callback or wl_display event with 16ms timeout (60FPS)
+        if (poll(fds, sizeof(fds) / sizeof(fds[0]), 16) == -1 && errno != EINTR)
             break;
 
         // If wl_display_prepare_read() was successful as 0
@@ -1165,9 +1166,9 @@ int main(int argc, char **argv) {
 
         // MPV is ready to draw a new frame
         if (fds[1].revents & POLLIN) {
-            // Empty the pipe
-            char tmp[64];
-            if (read(wakeup_pipe[0], tmp, sizeof(tmp)) == -1)
+            // Empty the eventfd
+            uint64_t tmp;
+            if (read(wakeup_fd, &tmp, sizeof(tmp)) == -1)
                 break;
 
             mpv_render_context_update(mpv_glcontext);
