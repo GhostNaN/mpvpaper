@@ -354,7 +354,7 @@ static void *handle_mpv_events(void *_) {
     const int MPV_OBSERVE_PAUSE = 1;
     mpv_observe_property(mpv, MPV_OBSERVE_PAUSE, "pause", MPV_FORMAT_FLAG);
 
-    while (true) {
+    while (!halt_info.stop_render_loop) {
         if (SLIDESHOW_TIME) {
             if ((time(NULL) - start_time) >= SLIDESHOW_TIME) {
                 mpv_command_async(mpv, 0, (const char *[]){"playlist-next", NULL});
@@ -490,6 +490,7 @@ static void init_mpv(const struct wl_state *state) {
         }
         mpv_set_option_string(mpv, "vo", "libmpv");
     }
+    mpv_free(vo_option);
 
     // Have mpv render onto egl context
     mpv_render_param params[] = {
@@ -546,8 +547,10 @@ static void init_mpv(const struct wl_state *state) {
         cflp_info("Loaded %s", video_path);
 
     // Return start pos to default
-    if (default_start)
+    if (default_start) {
         mpv_command(mpv, (const char *[]){"set", "start", default_start, NULL});
+        mpv_free(default_start);
+    }
 
     // mpv must never idle
     mpv_command(mpv, (const char *[]){"set", "idle", "no", NULL});
@@ -1004,6 +1007,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                                       "Your options are: top, bottom, background and overlay", layer_name);
                     exit(EXIT_FAILURE);
                 }
+
+                free(layer_name);
                 break;
             case 'o':
                 mpv_options = strdup(optarg);
