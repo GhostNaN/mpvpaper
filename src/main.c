@@ -1012,13 +1012,48 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 break;
             case 'o':
                 mpv_options = strdup(optarg);
-                // Replace spaces with newlines
-                for (int i=0; i < (int)strlen(mpv_options); i++) {
-                    if (mpv_options[i] == ' ')
-                        mpv_options[i] = '\n';
-                }
-                break;
+                // Split options by newline handling quotes and escaped characters
+                bool in_single_quotes = 0, in_double_quotes = 0, escape_next_char = 0;
+                int write_index = 0;
+                for (int i = 0; mpv_options[i] != '\0'; i++) {
+                    if (escape_next_char) {
+                        mpv_options[write_index++] = mpv_options[i];
+                        escape_next_char = 0;
+                        continue;
+                    }
 
+                    switch (mpv_options[i]) {
+                        case '\\':
+                            if (!in_single_quotes) {
+                                escape_next_char = 1;
+                            } else {
+                                mpv_options[write_index++] = mpv_options[i];
+                            }
+                            break;
+                        case '"':
+                            if (!in_single_quotes)
+                                in_double_quotes = !in_double_quotes;
+                            mpv_options[write_index++] = mpv_options[i];
+                            break;
+                        case '\'':
+                            if (!in_double_quotes)
+                                in_single_quotes = !in_single_quotes;
+                            mpv_options[write_index++] = mpv_options[i];
+                            break;
+                        case ' ':
+                            if (!in_single_quotes && !in_double_quotes) {
+                                mpv_options[write_index++] = '\n'; // Replace space with newline
+                            } else {
+                                mpv_options[write_index++] = mpv_options[i];
+                            }
+                            break;
+                        default:
+                            mpv_options[write_index++] = mpv_options[i];
+                            break;
+                    }
+                }
+                mpv_options[write_index] = '\0';
+                break;
             case 'Z': // Hidden option to recover video pos after stopping
                 halt_info.save_info = strdup(optarg);
                 break;
