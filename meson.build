@@ -30,6 +30,6 @@ include_directories : ['inc'],
 dependencies: [dl_dep, wl_client, wl_egl, egl, mpv, threads, protocols_dep], install: true)
 
 shm_dep = cc.find_library('rt', required : false)
-executable(meson.project_name() + '-holder', ['src/holder.c'],
+executable(meson.project_name() + '-holder', ['src/holder.c', 'src/cflogprinter.c'],
 include_directories : ['inc'],
 dependencies: [dl_dep, wl_client, shm_dep, protocols_dep], install: true)

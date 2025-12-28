@@ -442,6 +442,10 @@ static void set_init_mpv_options(const struct wl_state *state) {
 
         // Put options into config file
         FILE *file = fopen(opt_config_path, "w");
+        if (!file) {
+            cflp_error("Failed to create file path for mpv options config");
+            exit_mpvpaper(EXIT_FAILURE);
+        }
         fputs(mpv_options, file);
         fclose(file);
 
@@ -773,13 +777,12 @@ static void output_description(void *data, struct wl_output *wl_output, const ch
     char *paren = strrchr(description, '(');
     if (paren) {
         size_t length = paren - description;
-        output->identifier = calloc(length, sizeof(char));
+        output->identifier = calloc(length + 1, sizeof(char));
         if (!output->identifier) {
-            cflp_warning("Failed to allocate output identifier");
+            cflp_error("Failed to allocate output identifier");
             return;
         }
         strncpy(output->identifier, description, length);
-        output->identifier[length - 1] = '\0';
     } else {
         output->identifier = strdup(description);
     }
@@ -803,6 +806,11 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
         state->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         struct display_output *output = calloc(1, sizeof(struct display_output));
+        if (!output) {
+          fprintf(stderr, "Failed to allocate display output");
+          exit(EXIT_FAILURE);
+        }
+
         output->scale = 1; // Default to no scaling
         output->state = state;
         output->wl_name = name;
@@ -819,7 +827,7 @@ static void handle_global_remove(void *data, struct wl_registry *registry, uint3
     (void)registry;
 
     struct wl_state *state = data;
-    struct display_output *output, *tmp;
+    struct display_output *output = NULL, *tmp = NULL;
     wl_list_for_each_safe(output, tmp, &state->outputs, link) {
         if (output->wl_name == name) {
             cflp_info("Destroying output %s (%s)", output->name, output->identifier);
@@ -852,6 +860,10 @@ static char **get_watch_list(char *path_name) {
         }
         // Null terminate
         list = realloc(list, (i+1) * sizeof(char *));
+        if (!list) {
+            cflp_error("Failed to reallocate watch list");
+            exit(EXIT_FAILURE);
+        }
         list[i] = NULL;
 
         fclose(file);
@@ -1012,6 +1024,11 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 break;
             case 'o':
                 mpv_options = strdup(optarg);
+                if (!mpv_options) {
+                    cflp_error("Failed to duplicate optarg");
+                    exit(EXIT_FAILURE);
+                }
+
                 // Replace spaces with newlines
                 for (int i=0; i < (int)strlen(mpv_options); i++) {
                     if (mpv_options[i] == ' ')
@@ -1179,7 +1196,7 @@ int main(int argc, char **argv) {
             mpv_render_context_update(mpv_glcontext);
 
             // Draw frame for all outputs
-            struct display_output *output;
+            struct display_output *output = NULL;
             wl_list_for_each(output, &state.outputs, link) {
                 // Redraw immediately if not waiting for frame callback
                 if (output->frame_callback == NULL) {
@@ -1196,7 +1213,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    struct display_output *output, *tmp_output;
+    struct display_output *output = NULL, *tmp_output = NULL;
     wl_list_for_each_safe(output, tmp_output, &state.outputs, link) { destroy_display_output(output); }
 
     return EXIT_SUCCESS;

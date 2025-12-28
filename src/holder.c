@@ -10,6 +10,7 @@
 
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include <wayland-client.h>
+#include <cflogprinter.h>
 
 typedef unsigned int uint;
 
@@ -241,9 +242,12 @@ static void output_description(void *data, struct wl_output *wl_output, const ch
     char *paren = strrchr(description, '(');
     if (paren) {
         size_t length = paren - description;
-        output->identifier = calloc(length, sizeof(char));
+        output->identifier = calloc(length + 1, sizeof(char));
+        if (!output->identifier) {
+            cflp_error("Failed to allocate output identifier");
+            return;
+        }
         strncpy(output->identifier, description, length);
-        output->identifier[length - 1] = '\0';
     } else {
         output->identifier = strdup(description);
     }
@@ -269,6 +273,11 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
         state->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         struct display_output *output = calloc(1, sizeof(struct display_output));
+        if (!output) {
+          fprintf(stderr, "Failed to allocate display output");
+          exit(EXIT_FAILURE);
+        }
+
         output->state = state;
         output->wl_name = name;
         output->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 4);
@@ -284,7 +293,7 @@ static void handle_global_remove(void *data, struct wl_registry *registry, uint3
     (void)registry;
 
     struct wl_state *state = data;
-    struct display_output *output, *tmp;
+    struct display_output *output = NULL, *tmp = NULL;
     wl_list_for_each_safe(output, tmp, &state->outputs, link) {
         if (output->wl_name == name) {
             destroy_display_output(output);
@@ -419,7 +428,7 @@ int main(int argc, char **argv) {
         // NOP
     }
 
-    struct display_output *output, *tmp_output;
+    struct display_output *output = NULL, *tmp_output = NULL;
     wl_list_for_each_safe(output, tmp_output, &state.outputs, link) { destroy_display_output(output); }
 
     return EXIT_SUCCESS;
