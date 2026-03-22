@@ -65,6 +65,8 @@ static mpv_render_context *mpv_glcontext;
 static int wakeup_fd;
 static char *video_path;
 static char *mpv_options = "";
+static char *gpu_context = NULL;
+static char *hwdec = NULL;
 static char *vulkan_device = NULL;
 
 static struct {
@@ -425,19 +427,17 @@ static void set_init_mpv_options(const struct wl_state *state) {
     mpv_set_option_string(mpv, "config", "yes");
     mpv_set_option_string(mpv, "background-color", "#00000000");
 
+    if (gpu_context && strcmp(gpu_context, "") != 0) {
+        mpv_set_option_string(mpv, "gpu-context", gpu_context);
+    }
+    // setting vulkan-device should automatically select vulkan hwdec
     if (vulkan_device && strcmp(vulkan_device, "") != 0) {
-      //forces waylandvk gpu context, vulkan hwdec and a GPU device so that we can specify which GPU mpv uses
-      mpv_set_option_string(mpv, "gpu-context", "waylandvk");
       mpv_set_option_string(mpv, "vulkan-device", vulkan_device);
       mpv_set_option_string(mpv, "hwdec", "vulkan");
     }
-
-    char *gpu_ctx = mpv_get_property_string(mpv, "options/gpu-context");
-    char *vk_dev  = mpv_get_property_string(mpv, "options/vulkan-device");
-    cflp_info("gpu-context=%s", gpu_ctx ? gpu_ctx : "(null)");
-    cflp_info("vulkan-device=%s", vk_dev ? vk_dev : "(null)");
-    mpv_free(gpu_ctx);
-    mpv_free(vk_dev);
+    if (hwdec && strcmp(hwdec, "") != 0) {
+        mpv_set_option_string(mpv, "hwdec", hwdec);
+    }
 
     // Convenience options passed for slideshow mode
     if (SLIDESHOW_TIME != 0) {
@@ -934,6 +934,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         {"slideshow", required_argument, NULL, 'n'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
+        {"gpu-context", required_argument, NULL, 'G'},
+        {"hwdec", required_argument, NULL, 'H'},
         {"vulkan-device", required_argument, NULL, 'V'},
         {0, 0, 0, 0}
     };
@@ -956,7 +958,9 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "                               And passes mpv options \"loop loop-playlist\" for convenience\n"
         "--layer        -l LAYER        Specifies shell surface layer to run on (background by default)\n"
         "--mpv-options  -o \"OPTIONS\"  Forwards mpv options (Must be within quotes\"\")\n"
-        "--vulkan-device -V DEVICE      Forces mpv vulkan-device to DEVICE - use mpv --vulkan-device=help for device identifiers (name or UUID is accepted) \n"
+        "--gpu-context  -G CONTEXT      Specifies graphical session context (see MPV documentation for more info)\n"
+        "--hwdec        -H DECODER      Enables specified HW decoder (see MPV documentation for more info)\n"
+        "--vulkan-device -V DEVICE      Forces mpv vulkan-device DEVICE and sets hwdec to vulkan (see MPV documentation for more info) \n"
         "\n"
         "* The auto options might not work as intended\n"
         "See the man page for more details\n";
@@ -964,7 +968,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
     char *layer_name;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hdvfpsn:l:o:V:Z:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hdvfpsn:l:o:G:H:V:Z:", long_options, NULL)) != -1) {
 
         switch (opt) {
             case 'h':
@@ -1031,14 +1035,23 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 mpv_options = strdup(optarg);
                 // Replace spaces with newlines
                 for (int i=0; i < (int)strlen(mpv_options); i++) {
-                    if (mpv_options[i] == ' ')
+                    if (mpv_options[i] == ' '){
                         mpv_options[i] = '\n';
+                    }
                 }
                 break;
 
+            case 'G':
+                gpu_context = strdup(optarg);
+                break;
+
+            case 'H':
+                hwdec = strdup(optarg);
+                break;
+
             case 'V':
-              vulkan_device = strdup(optarg);
-              break;
+                vulkan_device = strdup(optarg);
+                break;
 
             case 'Z': // Hidden option to recover video pos after stopping
                 halt_info.save_info = strdup(optarg);
