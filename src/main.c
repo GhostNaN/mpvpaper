@@ -650,31 +650,41 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     zwlr_layer_surface_v1_ack_configure(surface, serial);
     wl_surface_set_buffer_scale(output->surface, output->scale);
 
-    if (!output->egl_window) {
-        output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale,
-                output->height * output->scale);
-        output->egl_surface = eglCreatePlatformWindowSurface(egl_display, egl_config, output->egl_window, NULL);
-        if (!output->egl_surface) {
-            cflp_error("Failed to create EGL surface for %s %s", output->name, eglGetErrorString(eglGetError()));
-            destroy_display_output(output);
-            return;
+    if (width > 0 && height > 0) {
+        if (!output->egl_window) {
+            if (!mpv) {
+                init_egl(output->state);
+                init_mpv(output->state);
+                init_threads();
+                if (VERBOSE)
+                    cflp_success("EGL and MPV initialized");
+            }
+
+            output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale,
+                    output->height * output->scale);
+            output->egl_surface = eglCreatePlatformWindowSurface(egl_display, egl_config, output->egl_window, NULL);
+            if (!output->egl_surface) {
+                cflp_error("Failed to create EGL surface for %s %s", output->name, eglGetErrorString(eglGetError()));
+                destroy_display_output(output);
+                return;
+            }
+
+            if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context))
+                cflp_error("Failed to make output surface current %s", eglGetErrorString(eglGetError()));
+            eglSwapInterval(egl_display, 0);
+
+            // After making EGL_NO_SURFACE current to a context
+            // Only with the Nvidia Pro drivers will set the draw buffer state to GL_NONE
+            // So we are going to force GL_BACK just like Mesa's EGL implementation
+            glDrawBuffer(GL_BACK);
+
+            glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+
+            // Start render loop
+            render(output);
+        } else {
+            wl_egl_window_resize(output->egl_window, output->width * output->scale, output->height * output->scale, 0, 0);
         }
-
-        if (!eglMakeCurrent(egl_display, output->egl_surface, output->egl_surface, egl_context))
-            cflp_error("Failed to make output surface current %s", eglGetErrorString(eglGetError()));
-        eglSwapInterval(egl_display, 0);
-
-        // After making EGL_NO_SURFACE current to a context
-        // Only with the Nvidia Pro drivers will set the draw buffer state to GL_NONE
-        // So we are going to force GL_BACK just like Mesa's EGL implementation
-        glDrawBuffer(GL_BACK);
-
-        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-
-        // Start render loop
-        render(output);
-    } else {
-        wl_egl_window_resize(output->egl_window, output->width * output->scale, output->height * output->scale, 0, 0);
     }
 }
 
@@ -1102,17 +1112,8 @@ int main(int argc, char **argv) {
     if (VERBOSE)
         cflp_success("Connected to Wayland compositor");
 
-    // Don't start egl and mpv if just displaying outputs
-    if (!SHOW_OUTPUTS) {
-        // Init render before outputs
-        init_egl(&state);
-        if (VERBOSE)
-            cflp_success("EGL initialized");
-        init_mpv(&state);
-        init_threads();
-        if (VERBOSE)
-            cflp_success("MPV initialized");
-    }
+    // EGL and MPV will be initialized after the first valid configure event
+
 
     // Setup wayland surfaces
     struct wl_registry *registry = wl_display_get_registry(state.display);
