@@ -730,14 +730,25 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
     struct display_output *output = data;
 
-    bool name_ok = (strstr(output->state->monitor, output->name) != NULL) ||
-            (strlen(output->identifier) != 0 && strstr(output->state->monitor, output->identifier) != NULL) ||
-            // Keep for legacy reasons
-            (strcmp(output->state->monitor, "*") == 0) ||
-            // Let's just cover all cases here
-            (strcmp(output->state->monitor, "ALL") == 0) ||
-            (strcmp(output->state->monitor, "All") == 0) ||
-            (strcmp(output->state->monitor, "all") == 0);
+    // Find what monitors are listed seprated by spaces
+    char *monitor_copy = strdup(output->state->monitor);
+    bool name_ok = false;
+
+    for (char *tok = strtok(monitor_copy, " \t"); tok; tok = strtok(NULL, " \t")) {
+        if (strcmp(tok, output->name) == 0) {
+            name_ok = true;
+            break;
+        }
+    }
+    free(monitor_copy);
+
+    // Check for all other outputs types
+    name_ok = name_ok ||
+        (output->identifier[0] && strstr(output->state->monitor, output->identifier) != NULL) ||
+        strcmp(output->state->monitor, "*") == 0 ||
+        strcasecmp(output->state->monitor, "all") == 0;
+
+
     if (name_ok && !output->layer_surface) {
         if (VERBOSE)
             cflp_info("Output %s (%s) selected", output->name, output->identifier);
@@ -770,7 +781,7 @@ static void output_description(void *data, struct wl_output *wl_output, const ch
     // wlroots currently sets the description to `make model serial (name)`
     // Having `(name)` is redundant and must be removed to have a clean identifier.
     // If this changes in the future, this will need to be modified.
-    char *paren = strrchr(description, '(');
+    const char *paren = strrchr(description, '(');
     if (paren) {
         size_t length = paren - description;
         output->identifier = calloc(length, sizeof(char));
