@@ -238,7 +238,7 @@ static void output_description(void *data, struct wl_output *wl_output, const ch
 
     struct display_output *output = data;
 
-    char *paren = strrchr(description, '(');
+    const char *paren = strrchr(description, '(');
     if (paren) {
         size_t length = paren - description;
         output->identifier = calloc(length, sizeof(char));
