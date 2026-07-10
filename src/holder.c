@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
-#include <wayland-client.h>
+#include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 
 typedef unsigned int uint;
 
@@ -19,6 +19,7 @@ struct wl_state {
     struct wl_shm *shm;
     struct zwlr_layer_shell_v1 *layer_shell;
     struct wl_list outputs; // struct display_output::link
+    struct wl_list toplevel_handles;
     char *monitor; // User selected output
 };
 
@@ -31,8 +32,16 @@ struct display_output {
     struct wl_state *state;
     struct wl_surface *surface;
     struct zwlr_layer_surface_v1 *layer_surface;
+    struct wl_buffer *dummy_buffer;
 
     uint32_t width, height;
+
+    struct wl_list link;
+};
+
+struct toplevel_handle_state {
+    struct zwlr_foreign_toplevel_handle_v1 *handle;
+    bool is_blocking;
 
     struct wl_list link;
 };
@@ -40,10 +49,11 @@ struct display_output {
 static struct {
     char **argv_copy;
     char **stoplist;
-    bool auto_stop;
+    int auto_stop;
+    bool window_blocking;
 
     int start_time;
-} halt_info = {NULL, NULL, false, 0};
+} halt_info = {NULL, NULL, 0, 0, 0};
 
 static void revive_mpvpaper() {
     // Get the "real" cwd
@@ -73,55 +83,48 @@ static void check_stoplist() {
         revive_mpvpaper();
 }
 
-static struct wl_buffer *create_dummy_buffer(struct display_output *output) {
+static void init_dummy_buffer(struct display_output *output) {
     const int WIDTH = 1, HEIGHT = 1;
 
     int stride = WIDTH * 4; // 4 bytes per pixel
     int size = stride * HEIGHT;
 
     // Create shm
-    const char SHM_NAME[] = "/wl_shm-dummy";
+    const char SHM_NAME[] = "/mpvpaper-dummy";
     shm_unlink(SHM_NAME);
     int fd = shm_open(SHM_NAME, O_RDWR | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) exit(EXIT_FAILURE);
     shm_unlink(SHM_NAME);
-    if (ftruncate(fd, size) < 0) {
-        fprintf(stderr, "Failed to truncate shm");
-        exit(EXIT_FAILURE);
-    }
+    if (ftruncate(fd, size) < 0) exit(EXIT_FAILURE);
 
     struct wl_shm_pool *pool = wl_shm_create_pool(output->state->shm, fd, size);
-    struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, WIDTH, HEIGHT, stride, WL_SHM_FORMAT_XRGB8888);
+    output->dummy_buffer = wl_shm_pool_create_buffer(pool, 0, WIDTH, HEIGHT, stride, WL_SHM_FORMAT_XRGB8888);
 
     wl_shm_pool_destroy(pool);
     close(fd);
-    return buffer;
 }
 
 const static struct wl_callback_listener wl_surface_frame_listener;
 
 static void create_surface_frame(struct display_output *output) {
 
-    struct wl_buffer *dummy_buffer = create_dummy_buffer(output);
-
     // Callback new frame
     struct wl_callback *callback = wl_surface_frame(output->surface);
     wl_callback_add_listener(callback, &wl_surface_frame_listener, output);
-    wl_surface_attach(output->surface, dummy_buffer, 0, 0);
+    wl_surface_attach(output->surface, output->dummy_buffer, 0, 0);
     wl_surface_damage(output->surface, 0, 0, output->width, output->height);
     wl_surface_commit(output->surface);
-
-    wl_buffer_destroy(dummy_buffer);
 }
 
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t frame_time) {
     wl_callback_destroy(callback);
 
-    if (halt_info.stoplist) {
+    if (halt_info.stoplist && !halt_info.window_blocking) {
         check_stoplist();
         // If checking stoplist and frame callback took longer than a second don't revive
         if (frame_time - halt_info.start_time < 1000)
             revive_mpvpaper();
-    } else {
+    } else if (!halt_info.window_blocking) {
         revive_mpvpaper();
     }
 
@@ -131,6 +134,142 @@ static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t
 
 const static struct wl_callback_listener wl_surface_frame_listener = {
     .done = frame_handle_done,
+};
+
+static struct toplevel_handle_state *match_toplevel_handle(struct wl_state *wl_state,
+        struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
+
+    struct toplevel_handle_state *handle_state;
+    wl_list_for_each(handle_state, &wl_state->toplevel_handles, link) {
+
+        if(handle_state->handle == toplevel_handle) {
+            return handle_state;
+        }
+    }
+
+    return NULL;
+}
+
+static void toplevel_title(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        const char *title) {
+    // NOP
+}
+
+static void toplevel_app_id(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        const char *app_id) {
+    // NOP
+}
+
+static void toplevel_output_enter(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        struct wl_output *output) {
+    // NOP
+}
+
+static void toplevel_output_leave(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        struct wl_output *output) {
+    // NOP
+}
+
+static void check_handle_blocking(struct toplevel_handle_state *handle_state, struct wl_state *wl_state,
+        bool currently_blocking) {
+
+    if (handle_state->is_blocking != currently_blocking) {
+        handle_state->is_blocking = currently_blocking;
+
+        bool any_blocking = false;
+        struct toplevel_handle_state *iter_handle;
+        wl_list_for_each(iter_handle, &wl_state->toplevel_handles, link) {
+            if (iter_handle->is_blocking) {
+                any_blocking = true;
+                break;
+            }
+        }
+
+        halt_info.window_blocking = any_blocking;
+    }
+}
+
+static void toplevel_state(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        struct wl_array *state) {
+
+    struct wl_state *wl_state = data;
+    struct toplevel_handle_state *handle_state = match_toplevel_handle(wl_state, toplevel_handle);
+    if (!handle_state) return;
+
+    uint32_t *s;
+    bool currently_blocking = false;
+
+    wl_array_for_each(s, state) {
+        if (*s == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_FULLSCREEN) {
+            currently_blocking = true;
+            break;
+        } else if (*s == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MAXIMIZED) {
+            if (halt_info.auto_stop > 2) {
+                currently_blocking = true;
+                break;
+            }
+        }
+    }
+
+    check_handle_blocking(handle_state, wl_state, currently_blocking);
+}
+
+
+static void toplevel_done(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
+    // NOP
+}
+
+static void toplevel_closed(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
+
+    struct wl_state *wl_state = data;
+
+    struct toplevel_handle_state *handle_state = match_toplevel_handle(wl_state, toplevel_handle);
+    if (!handle_state) return;
+
+    if(handle_state->is_blocking) {
+        check_handle_blocking(handle_state, wl_state, false);
+    }
+
+    wl_list_remove(&handle_state->link);
+}
+
+static void toplevel_parent(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        struct zwlr_foreign_toplevel_handle_v1 *parent) {
+    // NOP
+}
+
+static const struct zwlr_foreign_toplevel_handle_v1_listener toplevel_handle_listener = {
+    .title = toplevel_title,
+    .app_id = toplevel_app_id,
+    .output_enter = toplevel_output_enter,
+    .output_leave = toplevel_output_leave,
+    .state = toplevel_state,
+    .done = toplevel_done,
+    .closed = toplevel_closed,
+    .parent = toplevel_parent,
+};
+
+
+static void toplevel_created(void *data, struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager,
+        struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
+
+    struct wl_state *state = data;
+
+    struct toplevel_handle_state *handle_state = calloc(1, sizeof(struct toplevel_handle_state));
+
+    handle_state->handle = toplevel_handle;
+    wl_list_insert(&state->toplevel_handles, &handle_state->link);
+
+    zwlr_foreign_toplevel_handle_v1_add_listener(handle_state->handle, &toplevel_handle_listener, state);
+}
+
+static void toplevel_finished(void *data, struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager) {
+    // NOP
+}
+
+static const struct zwlr_foreign_toplevel_manager_v1_listener toplevel_manager_listener = {
+    .toplevel = toplevel_created,
+    .finished = toplevel_finished,
 };
 
 static void destroy_display_output(struct display_output *output) {
@@ -220,6 +359,8 @@ static void output_done(void *data, struct wl_output *wl_output) {
         create_layer_surface(output);
     if (!name_ok)
         destroy_display_output(output);
+
+    init_dummy_buffer(output);
 }
 
 static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
@@ -277,6 +418,13 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
 
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
         state->layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface,1);
+    }
+    if (halt_info.auto_stop > 1) {
+        if (strcmp(interface, zwlr_foreign_toplevel_manager_v1_interface.name) == 0) {
+            struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager;
+            toplevel_manager = wl_registry_bind(registry, name, &zwlr_foreign_toplevel_manager_v1_interface, 3);
+            zwlr_foreign_toplevel_manager_v1_add_listener(toplevel_manager, &toplevel_manager_listener, state);
+        }
     }
 }
 
@@ -351,12 +499,12 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         {"fork", no_argument, NULL, 'f'},
         {"auto-pause", no_argument, NULL, 'p'},
         {"auto-stop", no_argument, NULL, 's'},
+        {"auto-mode", required_argument, NULL, 'a'},
         {"slideshow", required_argument, NULL, 'n'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
         {0, 0, 0, 0}
     };
-
     const char *usage =
         "Usage: mpvpaper-holder <mpvpaper options>\n"
         "Description:\n"
@@ -369,8 +517,10 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "- Set with \"-s\" or \"--auto-stop\" mpvpaper option\n";
 
 
+    int auto_mode = 0;
+
     int opt;
-    while ((opt = getopt_long(argc, argv, "hdvfpsn:l:o:Z:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hdvfpsa:n:l:o:Z:", long_options, NULL)) != -1) {
 
         switch (opt) {
             case 'h':
@@ -379,8 +529,15 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
             case 's':
                 halt_info.auto_stop = 1;
                 break;
+            case 'a':
+                if (strcasecmp(optarg, "full") == 0) auto_mode = 2;
+                else if (strcasecmp(optarg, "max") == 0) auto_mode = 3;
+                break;
         }
     }
+
+    if (auto_mode != 0)
+        halt_info.auto_stop = auto_mode;
 
     // Need at least an output
     if (optind >= argc) {
@@ -394,6 +551,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 int main(int argc, char **argv) {
     struct wl_state state = {0};
     wl_list_init(&state.outputs);
+    wl_list_init(&state.toplevel_handles);
 
     parse_command_line(argc, argv, &state);
     set_stop_list();
