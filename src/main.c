@@ -953,9 +953,11 @@ static void output_done(void *data, struct wl_output *wl_output) {
     }
     free(monitor_copy);
 
+    if (output->identifier) // Some compositors don't have an identifier for some reason
+        name_ok = name_ok || (output->identifier[0] && strstr(output->state->monitor, output->identifier) != NULL);
+
     // Check for all other outputs types
     name_ok = name_ok ||
-        (output->identifier[0] && strstr(output->state->monitor, output->identifier) != NULL) ||
         strcmp(output->state->monitor, "*") == 0 ||
         strcasecmp(output->state->monitor, "all") == 0;
 
@@ -966,8 +968,12 @@ static void output_done(void *data, struct wl_output *wl_output) {
         create_layer_surface(output);
     }
     if (!name_ok || (strcmp(output->state->monitor, "") == 0)) {
-        if (SHOW_OUTPUTS)
-            cflp_info("Output: %s  Identifier: %s", output->name, output->identifier);
+        if (SHOW_OUTPUTS) {
+            if (output->name && output->identifier)
+                cflp_info("Output: %s  Identifier: %s", output->name, output->identifier);
+            else if (output->name)
+                cflp_info("Output: %s", output->name);
+        }
         destroy_display_output(output);
     }
 }
