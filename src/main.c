@@ -180,6 +180,7 @@ static void render(struct display_output *output) {
     if (mpv_err < 0)
         cflp_error("Failed to render frame with mpv, %s", mpv_error_string(mpv_err));
 
+    glFlush(); // [BUGFIX] Flush render context updates to GPU driver to prevent queue buildup
     // Callback new frame
     output->frame_callback = wl_surface_frame(output->surface);
     wl_callback_add_listener(output->frame_callback, &wl_surface_frame_listener, output);
@@ -188,6 +189,12 @@ static void render(struct display_output *output) {
     // Display frame
     if (!eglSwapBuffers(egl_display, output->egl_surface))
         cflp_error("Failed to swap egl buffers %s", eglGetErrorString(eglGetError()));
+    else {
+        // [BUGFIX] Inform libmpv that the buffer has been presented so it can release any
+        // associated GL fence objects and resources (PR #1)
+        if (mpv_glcontext)
+            mpv_render_context_report_swap(mpv_glcontext);
+    }
 }
 
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t frame_time) {
@@ -502,8 +509,71 @@ static void set_init_mpv_options(const struct wl_state *state) {
     }
 }
 
+// [BUGFIX] Sync fence tracking wrappers to resolve libmpv memory/descriptor leaks (PR #1)
+typedef GLsync (APIENTRY *PFNGLFENCESYNCPROC) (GLenum condition, GLbitfield flags);
+typedef void (APIENTRY *PFNGLDELETESYNCPROC) (GLsync sync);
+
+static PFNGLFENCESYNCPROC real_glFenceSync = NULL;
+static PFNGLDELETESYNCPROC real_glDeleteSync = NULL;
+
+#define MAX_TRACKED_FENCES 8
+static GLsync tracked_fences[MAX_TRACKED_FENCES];
+static int tracked_fence_count = 0;
+
+static GLsync APIENTRY wrap_glFenceSync(GLenum condition, GLbitfield flags) {
+    if (!real_glFenceSync) {
+        real_glFenceSync = (PFNGLFENCESYNCPROC)eglGetProcAddress("glFenceSync");
+    }
+    if (!real_glDeleteSync) {
+        real_glDeleteSync = (PFNGLDELETESYNCPROC)eglGetProcAddress("glDeleteSync");
+    }
+
+    // If we reached the limit, delete the oldest tracked fence
+    if (tracked_fence_count >= MAX_TRACKED_FENCES && real_glDeleteSync) {
+        real_glDeleteSync(tracked_fences[0]);
+        // Shift remaining fences left
+        for (int i = 1; i < tracked_fence_count; i++) {
+            tracked_fences[i - 1] = tracked_fences[i];
+        }
+        tracked_fence_count--;
+    }
+
+    GLsync sync = real_glFenceSync(condition, flags);
+    if (sync) {
+        tracked_fences[tracked_fence_count++] = sync;
+    }
+    return sync;
+}
+
+static void APIENTRY wrap_glDeleteSync(GLsync sync) {
+    if (!real_glDeleteSync) {
+        real_glDeleteSync = (PFNGLDELETESYNCPROC)eglGetProcAddress("glDeleteSync");
+    }
+    if (real_glDeleteSync) {
+        real_glDeleteSync(sync);
+    }
+
+    // Remove from our tracked list if present
+    for (int i = 0; i < tracked_fence_count; i++) {
+        if (tracked_fences[i] == sync) {
+            // Shift remaining fences left
+            for (int j = i + 1; j < tracked_fence_count; j++) {
+                tracked_fences[j - 1] = tracked_fences[j];
+            }
+            tracked_fence_count--;
+            break;
+        }
+    }
+}
+
 static void *get_proc_address_mpv(void *ctx, const char *name) {
     (void)ctx;
+    if (strcmp(name, "glFenceSync") == 0) {
+        return (void *)wrap_glFenceSync; // [BUGFIX] Redirect to fence creation wrapper (PR #1)
+    }
+    if (strcmp(name, "glDeleteSync") == 0) {
+        return (void *)wrap_glDeleteSync; // [BUGFIX] Redirect to fence deletion wrapper (PR #1)
+    }
     return eglGetProcAddress(name);
 }
 
