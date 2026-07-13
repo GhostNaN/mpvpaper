@@ -180,7 +180,6 @@ static void render(struct display_output *output) {
     if (mpv_err < 0)
         cflp_error("Failed to render frame with mpv, %s", mpv_error_string(mpv_err));
 
-    // Callback new frame
     output->frame_callback = wl_surface_frame(output->surface);
     wl_callback_add_listener(output->frame_callback, &wl_surface_frame_listener, output);
     output->redraw_needed = false;
@@ -188,6 +187,12 @@ static void render(struct display_output *output) {
     // Display frame
     if (!eglSwapBuffers(egl_display, output->egl_surface))
         cflp_error("Failed to swap egl buffers %s", eglGetErrorString(eglGetError()));
+    else {
+        // Inform libmpv that the buffer has been presented so it can release any
+        // associated GL fence objects and resources
+        if (mpv_glcontext)
+            mpv_render_context_report_swap(mpv_glcontext);
+    }
 }
 
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t frame_time) {
@@ -502,8 +507,18 @@ static void set_init_mpv_options(const struct wl_state *state) {
     }
 }
 
+/// Sync fence tracking wrapper to resolve libmpv memory/descriptor leaks by returning NULL
+static GLsync APIENTRY wrap_glFenceSync(GLenum condition, GLbitfield flags) {
+    (void)condition;
+    (void)flags;
+    return NULL;
+}
+
 static void *get_proc_address_mpv(void *ctx, const char *name) {
     (void)ctx;
+    if (strcmp(name, "glFenceSync") == 0) {
+        return (void *)wrap_glFenceSync; // Redirect to wrapper returning NULL
+    }
     return eglGetProcAddress(name);
 }
 
