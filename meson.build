@@ -7,6 +7,7 @@ wl_client=dependency('wayland-client')
 wl_egl=dependency('wayland-egl')
 egl=dependency('egl')
 mpv=dependency('mpv')
+vulkan=dependency('vulkan')
 threads=dependency('threads')
 
 scanner=find_program('wayland-scanner')
@@ -27,9 +28,9 @@ protocols_headers=[
 lib_protocols=static_library('protocols',protocols_src+protocols_headers,dependencies: wl_client)
 protocols_dep=declare_dependency(link_with: lib_protocols,sources: protocols_headers)
 
-executable(meson.project_name(), ['src/main.c', 'src/glad.c', 'src/cflogprinter.c'],
+executable(meson.project_name(), ['src/main.c', 'src/vulkan_backend.c', 'src/glad.c', 'src/cflogprinter.c'],
 include_directories : ['inc'],
-dependencies: [dl_dep, wl_client, wl_egl, egl, mpv, threads, protocols_dep], install: true)
+dependencies: [dl_dep, wl_client, wl_egl, egl, mpv, vulkan, threads, protocols_dep], install: true)
 
 shm_dep = cc.find_library('rt', required : false)
 executable(meson.project_name() + '-holder', ['src/holder.c'],

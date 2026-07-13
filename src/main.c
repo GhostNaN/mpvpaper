@@ -23,6 +23,8 @@
 #include <mpv/client.h>
 #include <mpv/render_gl.h>
 
+#include "vulkan_backend.h"
+
 #include <cflogprinter.h>
 
 typedef unsigned int uint;
@@ -48,6 +50,7 @@ struct display_output {
     struct zwlr_layer_surface_v1 *layer_surface;
     struct wl_egl_window *egl_window;
     EGLSurface *egl_surface;
+    struct vulkan_output *vk_output;
 
     uint32_t width, height;
     uint32_t scale;
@@ -75,6 +78,8 @@ static mpv_render_context *mpv_glcontext;
 static int wakeup_fd;
 static char *video_path;
 static char *mpv_options = "";
+static bool USE_VULKAN = false;
+static char *VULKAN_DEVICE = NULL;
 
 static struct {
     char **pauselist;
@@ -125,6 +130,8 @@ static void exit_cleanup() {
 
     if (mpv_glcontext)
         mpv_render_context_free(mpv_glcontext);
+    if (USE_VULKAN)
+        vulkan_backend_destroy();
     if (mpv)
         mpv_terminate_destroy(mpv);
 
@@ -157,6 +164,36 @@ static void handle_signal(int signum) {
 const static struct wl_callback_listener wl_surface_frame_listener;
 
 static void render(struct display_output *output) {
+    if (USE_VULKAN) {
+        if (!output->vk_output)
+            return;
+
+        // A Wayland frame callback is part of the next surface commit.  Vulkan
+        // WSI performs that commit from vkQueuePresentKHR(), so the callback
+        // must be requested before presenting.  Requesting it afterwards leaves
+        // frame_callback non-NULL without any committed callback to wake us up,
+        // permanently blocking subsequent renders.
+        output->frame_callback = wl_surface_frame(output->surface);
+        if (!output->frame_callback) {
+            cflp_error("Failed to create Wayland frame callback for %s", output->name);
+            return;
+        }
+        wl_callback_add_listener(output->frame_callback, &wl_surface_frame_listener, output);
+
+        if (!vulkan_output_render(output->vk_output, mpv_glcontext)) {
+            // No usable presentation was queued. Do not leave the output
+            // waiting on a callback which may never be committed.
+            wl_callback_destroy(output->frame_callback);
+            output->frame_callback = NULL;
+            vulkan_output_resize(output->vk_output, output->width * output->scale,
+                                 output->height * output->scale);
+            return;
+        }
+
+        output->redraw_needed = false;
+        return;
+    }
+
     mpv_render_param render_params[] = {
         {MPV_RENDER_PARAM_OPENGL_FBO, &(mpv_opengl_fbo) {
             .fbo = 0,
@@ -558,19 +595,25 @@ static void init_mpv(const struct wl_state *state) {
     }
     mpv_free(vo_option);
 
-    // Have mpv render onto egl context
-    mpv_render_param params[] = {
-        {MPV_RENDER_PARAM_WL_DISPLAY, state->display},
-        {MPV_RENDER_PARAM_API_TYPE, MPV_RENDER_API_TYPE_OPENGL},
-        {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &(mpv_opengl_init_params){
-            .get_proc_address = get_proc_address_mpv,
-        }},
-        {MPV_RENDER_PARAM_INVALID, NULL},
-    };
-    mpv_err = mpv_render_context_create(&mpv_glcontext, mpv, params);
-    if (mpv_err < 0) {
-        cflp_error("Failed to initialize mpv GL context, %s", mpv_error_string(mpv_err));
-        exit_mpvpaper(EXIT_FAILURE);
+    if (USE_VULKAN) {
+        mpv_glcontext = vulkan_backend_create_mpv_context(mpv, state->display);
+        if (!mpv_glcontext)
+            exit_mpvpaper(EXIT_FAILURE);
+    } else {
+        // Have mpv render onto egl context
+        mpv_render_param params[] = {
+            {MPV_RENDER_PARAM_WL_DISPLAY, state->display},
+            {MPV_RENDER_PARAM_API_TYPE, MPV_RENDER_API_TYPE_OPENGL},
+            {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &(mpv_opengl_init_params){
+                .get_proc_address = get_proc_address_mpv,
+            }},
+            {MPV_RENDER_PARAM_INVALID, NULL},
+        };
+        mpv_err = mpv_render_context_create(&mpv_glcontext, mpv, params);
+        if (mpv_err < 0) {
+            cflp_error("Failed to initialize mpv GL context, %s", mpv_error_string(mpv_err));
+            exit_mpvpaper(EXIT_FAILURE);
+        }
     }
 
     // Restore video position after auto stop event
@@ -856,6 +899,8 @@ static void destroy_display_output(struct display_output *output) {
         zwlr_layer_surface_v1_destroy(output->layer_surface);
     if (output->surface != NULL)
         wl_surface_destroy(output->surface);
+    if (output->vk_output)
+        vulkan_output_destroy(output->vk_output);
     if (output->egl_surface)
         eglDestroySurface(egl_display, output->egl_surface);
     if (output->egl_window)
@@ -875,6 +920,23 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     output->height = height;
     zwlr_layer_surface_v1_ack_configure(surface, serial);
     wl_surface_set_buffer_scale(output->surface, output->scale);
+
+    if (USE_VULKAN) {
+        if (!output->vk_output) {
+            output->vk_output = vulkan_output_create(output->state->display, output->surface,
+                    output->width * output->scale, output->height * output->scale);
+            if (!output->vk_output) {
+                cflp_error("Failed to create Vulkan output for %s", output->name);
+                destroy_display_output(output);
+                return;
+            }
+            render(output);
+        } else {
+            vulkan_output_resize(output->vk_output, output->width * output->scale,
+                                 output->height * output->scale);
+        }
+        return;
+    }
 
     if (!output->egl_window) {
         output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale,
@@ -1170,6 +1232,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         {"slideshow", required_argument, NULL, 'n'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
+        {"gpu-api", required_argument, NULL, 'G'},
+        {"vulkan-device", required_argument, NULL, 'V'},
         {0, 0, 0, 0}
     };
 
@@ -1201,7 +1265,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
     int auto_mode = 0;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hdvfpsa:n:l:o:Z:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hdvfpsa:n:l:o:G:V:Z:", long_options, NULL)) != -1) {
 
         switch (opt) {
             case 'h':
@@ -1316,6 +1380,20 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 }
                 mpv_options[write_index] = '\0';
                 break;
+            case 'G':
+                if (strcasecmp(optarg, "vulkan") == 0)
+                    USE_VULKAN = true;
+                else if (strcasecmp(optarg, "opengl") == 0)
+                    USE_VULKAN = false;
+                else {
+                    cflp_error("Unknown gpu-api '%s'; expected opengl or vulkan", optarg);
+                    exit(EXIT_FAILURE);
+                }
+                break;
+            case 'V':
+                VULKAN_DEVICE = strdup(optarg);
+                USE_VULKAN = true;
+                break;
             case 'Z': // Hidden option to recover video pos after stopping
                 halt_info.save_info = strdup(optarg);
                 break;
@@ -1415,9 +1493,14 @@ int main(int argc, char **argv) {
     // Don't start egl and mpv if just displaying outputs
     if (!SHOW_OUTPUTS) {
         // Init render before outputs
-        init_egl(&state);
-        if (VERBOSE)
-            cflp_success("EGL initialized");
+        if (USE_VULKAN) {
+            if (!vulkan_backend_init(VULKAN_DEVICE, VERBOSE))
+                return EXIT_FAILURE;
+        } else {
+            init_egl(&state);
+            if (VERBOSE)
+                cflp_success("EGL initialized");
+        }
         init_mpv(&state);
         init_threads();
         if (VERBOSE)
@@ -1494,7 +1577,8 @@ int main(int argc, char **argv) {
                 // Redraw immediately if not waiting for frame callback
                 if (output->frame_callback == NULL) {
                     // Avoid crash when output is destroyed
-                    if (output->egl_window && output->egl_surface) {
+                    if ((USE_VULKAN && output->vk_output) ||
+                        (!USE_VULKAN && output->egl_window && output->egl_surface)) {
                         if (VERBOSE == 2)
                             cflp_info("MPV is ready to render the next frame for %s", output->name);
                         render(output);
