@@ -863,6 +863,9 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     zwlr_layer_surface_v1_ack_configure(surface, serial);
     wl_surface_set_buffer_scale(output->surface, output->scale);
 
+    // Ignore bad surfaces
+    if (width == 0 || height == 0) return;
+
     if (!output->egl_window) {
         output->egl_window = wl_egl_window_create(output->surface, output->width * output->scale,
                 output->height * output->scale);
