@@ -13,6 +13,7 @@
 #include <sys/eventfd.h>
 
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 #include <wayland-client.h>
 #include <wayland-egl.h>
 
@@ -31,6 +32,7 @@ struct wl_state {
     struct wl_compositor *compositor;
     struct zwlr_layer_shell_v1 *layer_shell;
     struct wl_list outputs; // struct display_output::link
+    struct wl_list toplevel_handles;
     char *monitor; // User selected output
     int surface_layer;
 };
@@ -56,6 +58,14 @@ struct display_output {
     bool redraw_needed;
 };
 
+struct toplevel_handle_state {
+    struct zwlr_foreign_toplevel_handle_v1 *handle;
+    char *title;
+    bool is_blocking;
+
+    struct wl_list link;
+};
+
 static EGLConfig egl_config;
 static EGLDisplay *egl_display;
 static EGLContext *egl_context;
@@ -74,16 +84,23 @@ static struct {
     char **argv_copy;
     char *save_info;
 
-    bool auto_pause;
-    bool auto_stop;
+    int auto_pause;
+    int auto_stop;
 
-    int is_paused;
+    bool list_paused;
+    bool auto_paused;
+    bool full_paused;
+    bool user_paused;
+    bool mpv_paused;
+
     bool frame_ready;
     bool stop_render_loop;
 
-} halt_info = {NULL, NULL, 0, NULL, NULL, 0, 0, 0, 0, 0};
+} halt_info = {NULL, NULL, 0, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 static pthread_t threads[5] = {0};
+static pthread_mutex_t halt_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 static uint SLIDESHOW_TIME = 0;
 static bool SHOW_OUTPUTS = false;
@@ -171,6 +188,12 @@ static void render(struct display_output *output) {
     // Display frame
     if (!eglSwapBuffers(egl_display, output->egl_surface))
         cflp_error("Failed to swap egl buffers %s", eglGetErrorString(eglGetError()));
+    else {
+        // Inform libmpv that the buffer has been presented so it can release any
+        // associated GL fence objects and resources
+        if (mpv_glcontext)
+            mpv_render_context_report_swap(mpv_glcontext);
+    }
 }
 
 static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t frame_time) {
@@ -182,7 +205,9 @@ static void frame_handle_done(void *data, struct wl_callback *callback, uint32_t
     output->frame_callback = NULL;
 
     // Reset deadman switch timer
+    pthread_mutex_lock(&halt_mutex);
     halt_info.frame_ready = 1;
+    pthread_mutex_unlock(&halt_mutex);
 
     // Render next frame
     if (output->redraw_needed) {
@@ -250,6 +275,38 @@ static void pthread_usleep(uint time) {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 }
 
+// Update pause flags and mpv state safely
+static void update_mpv_pause_state(bool *pause_flag, bool new_flag_state, const char *reason) {
+    pthread_mutex_lock(&halt_mutex);
+
+    *pause_flag = new_flag_state;
+
+    bool call_pause = (
+        halt_info.list_paused ||
+        halt_info.auto_paused ||
+        halt_info.user_paused ||
+        halt_info.full_paused);
+
+    // Only command MPV if the aggregate state changes
+    if (call_pause != halt_info.mpv_paused) {
+        halt_info.mpv_paused = call_pause;
+
+        if (new_flag_state && reason && VERBOSE)
+            cflp_info("Pause triggered by: %s", reason);
+        else if (reason && VERBOSE)
+            cflp_info("Pause cleared by: %s", reason);
+
+        mpv_command_async(mpv, 0, (const char *[]){
+            "set",
+            "pause",
+            call_pause ? "yes" : "no",
+            NULL
+        });
+    }
+
+    pthread_mutex_unlock(&halt_mutex);
+}
+
 static char *check_watch_list(char **list) {
 
     char pid_name[512] = {0};
@@ -271,17 +328,14 @@ static void *monitor_pauselist(void *_) {
     while (halt_info.pauselist) {
 
         char *app = check_watch_list(halt_info.pauselist);
-        if (app && !list_paused && !halt_info.is_paused) {
-            if (VERBOSE)
-                cflp_info("Pausing for %s", app);
-            mpv_command_async(mpv, 0, (const char *[]){"set", "pause", "yes", NULL});
+        if (app && !list_paused && !halt_info.list_paused && !halt_info.mpv_paused) {
+            update_mpv_pause_state(&halt_info.list_paused, true, app);
             list_paused = 1;
-            halt_info.is_paused += 1;
         } else if (!app && list_paused) {
+            update_mpv_pause_state(&halt_info.list_paused, false, "Blocking Apps");
             list_paused = 0;
-            if (halt_info.is_paused)
-                halt_info.is_paused -= 1;
         }
+
 
         pthread_sleep(1);
     }
@@ -311,19 +365,20 @@ static void *handle_auto_pause(void *_) {
     while (halt_info.auto_pause) {
 
         // Set deadman switch timer
+        pthread_mutex_lock(&halt_mutex);
         halt_info.frame_ready = 0;
+        pthread_mutex_unlock(&halt_mutex);
+
         pthread_sleep(2);
-        if (!halt_info.frame_ready && !halt_info.is_paused) {
-            if (VERBOSE)
-                cflp_info("Pausing because mpvpaper is hidden");
-            mpv_command_async(mpv, 0, (const char *[]){"set", "pause", "yes", NULL});
-            halt_info.is_paused += 1;
+
+        if (!halt_info.frame_ready && !halt_info.auto_paused && !halt_info.mpv_paused) {
+            update_mpv_pause_state(&halt_info.auto_paused, true, "Frame Callback");
 
             while (!halt_info.frame_ready) {
                 pthread_usleep(10000);
             }
-            if (halt_info.is_paused)
-                halt_info.is_paused -= 1;
+            if (halt_info.auto_paused)
+                update_mpv_pause_state(&halt_info.auto_paused, false, "Frame Callback");
         }
     }
     pthread_exit(NULL);
@@ -335,9 +390,14 @@ static void *handle_auto_stop(void *_) {
     while (halt_info.auto_stop) {
 
         // Set deadman switch timer
+        pthread_mutex_lock(&halt_mutex);
         halt_info.frame_ready = 0;
+        pthread_mutex_unlock(&halt_mutex);
+
         pthread_sleep(2);
-        if (!halt_info.frame_ready) {
+
+        // While annoying, pausing also causes the frame to not callback and must be ignored
+        if (!halt_info.frame_ready && !halt_info.mpv_paused) {
             if (VERBOSE)
                 cflp_info("Stopping because mpvpaper is hidden");
             stop_mpvpaper();
@@ -371,16 +431,13 @@ static void *handle_mpv_events(void *_) {
                 mpv_get_property(mpv, "pause", MPV_FORMAT_FLAG, &mpv_paused);
                 if (mpv_paused) {
                     // User paused
-                    if (!halt_info.is_paused)
-                        halt_info.is_paused += 1;
-                } else {
-                    halt_info.is_paused = 0;
+                    if (!halt_info.list_paused && !halt_info.auto_paused && !halt_info.full_paused)
+                        update_mpv_pause_state(&halt_info.user_paused, true, NULL);
+                } else { // Clear paused checks if not paused
+                    update_mpv_pause_state(&halt_info.user_paused, false, NULL);
                 }
             }
         }
-
-        if (!halt_info.is_paused && mpv_paused)
-            mpv_command_async(mpv, 0, (const char *[]){"set", "pause", "no", NULL});
 
         pthread_usleep(10000);
     }
@@ -451,15 +508,28 @@ static void set_init_mpv_options(const struct wl_state *state) {
     }
 }
 
+// Sync fence tracking wrapper to resolve libmpv memory/descriptor leaks by returning NULL
+static GLsync APIENTRY wrap_glFenceSync(GLenum condition, GLbitfield flags) {
+    (void)condition;
+    (void)flags;
+    return NULL;
+}
+
 static void *get_proc_address_mpv(void *ctx, const char *name) {
     (void)ctx;
+    if (strcmp(name, "glFenceSync") == 0) {
+        return (void *)wrap_glFenceSync; // Redirect to wrapper returning NULL
+    }
     return eglGetProcAddress(name);
 }
 
 static void render_update_callback(void *callback_ctx) {
     (void)callback_ctx;
     uint64_t inc = 1;
-    (void)write(wakeup_fd, &inc, sizeof(inc));
+    if (write(wakeup_fd, &inc, sizeof(inc)) < 0) {
+        cflp_error("Failed to write to wakeup eventfd");
+        exit_mpvpaper(EXIT_FAILURE);
+    }
 }
 
 static void init_mpv(const struct wl_state *state) {
@@ -622,9 +692,152 @@ static void init_egl(struct wl_state *state) {
     }
 }
 
+static struct toplevel_handle_state *match_toplevel_handle(struct wl_state *wl_state,
+        struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
+
+    struct toplevel_handle_state *handle_state;
+    wl_list_for_each(handle_state, &wl_state->toplevel_handles, link) {
+
+        if(handle_state->handle == toplevel_handle)
+            return handle_state;
+    }
+
+    return NULL;
+}
+
+static void toplevel_title(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        const char *title) {
+
+    struct wl_state *wl_state = data;
+
+    struct toplevel_handle_state *handle_state = match_toplevel_handle(wl_state, toplevel_handle);
+    if (!handle_state) return;
+
+    if (handle_state->title) free(handle_state->title);
+
+    handle_state->title = strdup(title);
+}
+
+static void toplevel_app_id(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        const char *app_id) { /* NOP */ }
+
+static void toplevel_output_enter(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        struct wl_output *output) { /* NOP */ }
+
+static void toplevel_output_leave(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        struct wl_output *output) { /* NOP */ }
+
+static void check_handle_blocking(struct toplevel_handle_state *handle_state, struct wl_state *wl_state,
+        bool currently_blocking) {
+
+    if (handle_state->is_blocking != currently_blocking) {
+        handle_state->is_blocking = currently_blocking;
+
+        // Calculate if ANY window is still blocking the screen
+        bool any_blocking = false;
+        struct toplevel_handle_state *iter_handle;
+        wl_list_for_each(iter_handle, &wl_state->toplevel_handles, link) {
+            if (iter_handle->is_blocking) {
+                any_blocking = true;
+                break;
+            }
+        }
+
+        if (any_blocking) {
+            if (halt_info.auto_stop) {
+                if (VERBOSE)
+                    cflp_info("Stopping for %s", iter_handle->title);
+
+                stop_mpvpaper();
+            }
+            if (!halt_info.full_paused && !halt_info.mpv_paused)
+                update_mpv_pause_state(&halt_info.full_paused, true, iter_handle->title);
+
+        } else { // No windows are blocking anymore
+            update_mpv_pause_state(&halt_info.full_paused, false, "Blocking Windows");
+        }
+    }
+}
+
+static void toplevel_state(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        struct wl_array *state) {
+
+    struct wl_state *wl_state = data;
+    struct toplevel_handle_state *handle_state = match_toplevel_handle(wl_state, toplevel_handle);
+    if (!handle_state) return;
+
+    uint32_t *s;
+    bool currently_blocking = false;
+
+    wl_array_for_each(s, state) {
+        if (*s == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_FULLSCREEN) {
+            currently_blocking = true;
+            break;
+        } else if (*s == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MAXIMIZED) {
+            if (halt_info.auto_pause > 2 || halt_info.auto_stop > 2) {
+                currently_blocking = true;
+                break;
+            }
+        }
+    }
+
+    check_handle_blocking(handle_state, wl_state, currently_blocking);
+}
+
+static void toplevel_done(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) { /* NOP */ }
+
+static void toplevel_closed(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
+
+    struct wl_state *wl_state = data;
+
+    struct toplevel_handle_state *handle_state = match_toplevel_handle(wl_state, toplevel_handle);
+    if (!handle_state) return;
+
+    if(handle_state->is_blocking)
+        check_handle_blocking(handle_state, wl_state, false);
+
+    // Destroy handle
+    if (handle_state->title) free(handle_state->title);
+    wl_list_remove(&handle_state->link);
+}
+
+static void toplevel_parent(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
+        struct zwlr_foreign_toplevel_handle_v1 *parent) { /* NOP */ }
+
+static const struct zwlr_foreign_toplevel_handle_v1_listener toplevel_handle_listener = {
+    .title = toplevel_title,
+    .app_id = toplevel_app_id,
+    .output_enter = toplevel_output_enter,
+    .output_leave = toplevel_output_leave,
+    .state = toplevel_state,
+    .done = toplevel_done,
+    .closed = toplevel_closed,
+    .parent = toplevel_parent,
+};
+
+static void toplevel_created(void *data, struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager,
+        struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
+
+    struct wl_state *state = data;
+
+    struct toplevel_handle_state *handle_state = calloc(1, sizeof(struct toplevel_handle_state));
+
+    handle_state->handle = toplevel_handle;
+    wl_list_insert(&state->toplevel_handles, &handle_state->link);
+
+    zwlr_foreign_toplevel_handle_v1_add_listener(handle_state->handle, &toplevel_handle_listener, state);
+}
+
+static void toplevel_finished(void *data, struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager) { /* NOP */ }
+
+static const struct zwlr_foreign_toplevel_manager_v1_listener toplevel_manager_listener = {
+    .toplevel = toplevel_created,
+    .finished = toplevel_finished,
+};
+
 static void destroy_display_output(struct display_output *output) {
-    if (!output)
-        return;
+    if (!output) return;
+
     wl_list_remove(&output->link);
     if (output->layer_surface != NULL)
         zwlr_layer_surface_v1_destroy(output->layer_surface);
@@ -726,41 +939,56 @@ static void create_layer_surface(struct display_output *output) {
 }
 
 static void output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width,
-        int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) {
-    // NOP
-}
+        int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) { /* NOP */ }
 
 static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height,
-        int32_t refresh) {
-    // NOP
-}
+        int32_t refresh) { /* NOP */ }
 
 static void output_done(void *data, struct wl_output *wl_output) {
     (void)wl_output;
 
     struct display_output *output = data;
 
-    bool name_ok = (strstr(output->state->monitor, output->name) != NULL) ||
-            (strlen(output->identifier) != 0 && strstr(output->state->monitor, output->identifier) != NULL) ||
-            // Keep for legacy reasons
-            (strcmp(output->state->monitor, "*") == 0) ||
-            // Let's just cover all cases here
-            (strcmp(output->state->monitor, "ALL") == 0) ||
-            (strcmp(output->state->monitor, "All") == 0) ||
-            (strcmp(output->state->monitor, "all") == 0);
+    // Find what monitors are listed seprated by spaces
+    char *monitor_copy = strdup(output->state->monitor);
+    bool name_ok = false;
+
+    for (char *tok = strtok(monitor_copy, " \t"); tok; tok = strtok(NULL, " \t")) {
+        if (strcmp(tok, output->name) == 0) {
+            name_ok = true;
+            break;
+        }
+    }
+    free(monitor_copy);
+
+    if (output->identifier) // Some compositors don't have an identifier for some reason
+        name_ok = name_ok || (output->identifier[0] && strstr(output->state->monitor, output->identifier) != NULL);
+
+    // Check for all other outputs types
+    name_ok = name_ok ||
+        strcmp(output->state->monitor, "*") == 0 ||
+        strcasecmp(output->state->monitor, "all") == 0;
+
+
     if (name_ok && !output->layer_surface) {
         if (VERBOSE)
             cflp_info("Output %s (%s) selected", output->name, output->identifier);
         create_layer_surface(output);
     }
     if (!name_ok || (strcmp(output->state->monitor, "") == 0)) {
-        if (SHOW_OUTPUTS)
-            cflp_info("Output: %s  Identifier: %s", output->name, output->identifier);
+        if (SHOW_OUTPUTS) {
+            if (output->name && output->identifier)
+                cflp_info("Output: %s  Identifier: %s", output->name, output->identifier);
+            else if (output->name)
+                cflp_info("Output: %s", output->name);
+        }
         destroy_display_output(output);
     }
 }
 
 static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
+    (void)wl_output;
+
     struct display_output *output = data;
     output->scale = scale;
 }
@@ -780,7 +1008,7 @@ static void output_description(void *data, struct wl_output *wl_output, const ch
     // wlroots currently sets the description to `make model serial (name)`
     // Having `(name)` is redundant and must be removed to have a clean identifier.
     // If this changes in the future, this will need to be modified.
-    char *paren = strrchr(description, '(');
+    const char *paren = strrchr(description, '(');
     if (paren) {
         size_t length = paren - description;
         output->identifier = calloc(length, sizeof(char));
@@ -822,6 +1050,13 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
 
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
         state->layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, 1);
+    }
+    if (halt_info.auto_pause > 1 || halt_info.auto_stop > 1) {
+        if (strcmp(interface, zwlr_foreign_toplevel_manager_v1_interface.name) == 0) {
+            struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager;
+            toplevel_manager = wl_registry_bind(registry, name, &zwlr_foreign_toplevel_manager_v1_interface, 3);
+            zwlr_foreign_toplevel_manager_v1_add_listener(toplevel_manager, &toplevel_manager_listener, state);
+        }
     }
 }
 
@@ -881,7 +1116,7 @@ static void copy_argv(int argc, char *argv[]) {
     }
 
     int j = 0;
-    for (int i=0; i < argc; i++) {
+    for (uint i=0; i < argc; i++) {
         if (strcmp(argv[i], "-Z") == 0) { // Remove hidden opt
             i++; // Skip optind
             halt_info.argc -= 2;
@@ -926,6 +1161,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         {"fork", no_argument, NULL, 'f'},
         {"auto-pause", no_argument, NULL, 'p'},
         {"auto-stop", no_argument, NULL, 's'},
+        {"auto-mode", required_argument, NULL, 'a'},
         {"slideshow", required_argument, NULL, 'n'},
         {"layer", required_argument, NULL, 'l'},
         {"mpv-options", required_argument, NULL, 'o'},
@@ -935,7 +1171,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
     const char *usage =
         "Usage: mpvpaper [options] <output> <url|path filename>\n"
         "\n"
-        "Example: mpvpaper -vs -o \"no-audio loop\" DP-2 /path/to/video\n"
+        "Example: mpvpaper -vs -a full -o \"no-audio loop\" DP-2 /path/to/video\n"
         "\n"
         "Options:\n"
         "--help         -h              Displays this help message\n"
@@ -946,6 +1182,8 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "                               This saves CPU usage, more or less, seamlessly\n"
         "--auto-stop    -s              Automagically* stop mpv when the wallpaper is hidden\n"
         "                               This saves CPU/RAM usage, although more abruptly\n"
+        "--auto-mode    -a FULL/MAX     Extends above auto options to also check if any window is found to be:\n"
+        "                               [FULL = fullscreen] or [MAX = fullscreen or maximized]\n"
         "--slideshow    -n SECS         Slideshow mode plays the next video in a playlist every ? seconds\n"
         "                               And passes mpv options \"loop loop-playlist\" for convenience\n"
         "--layer        -l LAYER        Specifies shell surface layer to run on (background by default)\n"
@@ -955,9 +1193,10 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "See the man page for more details\n";
 
     char *layer_name;
+    int auto_mode = 0;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hdvfpsn:l:o:Z:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hdvfpsa:n:l:o:Z:", long_options, NULL)) != -1) {
 
         switch (opt) {
             case 'h':
@@ -994,6 +1233,14 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                     halt_info.auto_pause = 0;
                 }
                 break;
+            case 'a':
+                if (strcasecmp(optarg, "full") == 0) auto_mode = 2;
+                else if (strcasecmp(optarg, "max") == 0) auto_mode = 3;
+                else {
+                    cflp_error("Neither FULL or MAX was selected for the auto-mode\n");
+                    exit(EXIT_FAILURE);
+                }
+                break;
             case 'n':
                 SLIDESHOW_TIME = atoi(optarg);
                 if (SLIDESHOW_TIME == 0)
@@ -1022,13 +1269,48 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 break;
             case 'o':
                 mpv_options = strdup(optarg);
-                // Replace spaces with newlines
-                for (int i=0; i < (int)strlen(mpv_options); i++) {
-                    if (mpv_options[i] == ' ')
-                        mpv_options[i] = '\n';
-                }
-                break;
+                // Split options by newline handling quotes and escaped characters
+                bool in_single_quotes = 0, in_double_quotes = 0, escape_next_char = 0;
+                int write_index = 0;
+                for (uint i = 0; mpv_options[i] != '\0'; i++) {
+                    if (escape_next_char) {
+                        mpv_options[write_index++] = mpv_options[i];
+                        escape_next_char = 0;
+                        continue;
+                    }
 
+                    switch (mpv_options[i]) {
+                        case '\\':
+                            if (!in_single_quotes) {
+                                escape_next_char = 1;
+                            } else {
+                                mpv_options[write_index++] = mpv_options[i];
+                            }
+                            break;
+                        case '"':
+                            if (!in_single_quotes)
+                                in_double_quotes = !in_double_quotes;
+                            mpv_options[write_index++] = mpv_options[i];
+                            break;
+                        case '\'':
+                            if (!in_double_quotes)
+                                in_single_quotes = !in_single_quotes;
+                            mpv_options[write_index++] = mpv_options[i];
+                            break;
+                        case ' ':
+                            if (!in_single_quotes && !in_double_quotes) {
+                                mpv_options[write_index++] = '\n'; // Replace space with newline
+                            } else {
+                                mpv_options[write_index++] = mpv_options[i];
+                            }
+                            break;
+                        default:
+                            mpv_options[write_index++] = mpv_options[i];
+                            break;
+                    }
+                }
+                mpv_options[write_index] = '\0';
+                break;
             case 'Z': // Hidden option to recover video pos after stopping
                 halt_info.save_info = strdup(optarg);
                 break;
@@ -1037,6 +1319,18 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 
     if (VERBOSE)
         cflp_info("Verbose Level %i enabled", VERBOSE);
+
+    // Put in auto_mode after loop to allow out of order options
+    if (auto_mode != 0) {
+        if (halt_info.auto_pause) {
+            halt_info.auto_pause = auto_mode;
+        } else if (halt_info.auto_stop) {
+            halt_info.auto_stop = auto_mode;
+        } else {
+            cflp_error("The auto-mode option requires either auto-pause or auto-stop to be enabled\n");
+            exit(EXIT_FAILURE);
+        }
+    }
 
     // Need at least a output and file or playlist file
     char *playlist_opt_pointer;
@@ -1072,7 +1366,7 @@ static void check_paper_processes() {
     const char *other_wallpapers[] = {"swaybg", "glpaper", "hyprpaper", "wpaperd", "swww-daemon"};
     char wallpaper_sbuffer[64] = {0};
 
-    for (int i=0; i < sizeof(other_wallpapers) / sizeof(other_wallpapers[0]); i++) {
+    for (uint i=0; i < sizeof(other_wallpapers) / sizeof(other_wallpapers[0]); i++) {
         snprintf(wallpaper_sbuffer, sizeof(wallpaper_sbuffer), "pidof %s > /dev/null", other_wallpapers[i]);
 
         if (!system(wallpaper_sbuffer))
@@ -1089,6 +1383,7 @@ int main(int argc, char **argv) {
 
     struct wl_state state = {0};
     wl_list_init(&state.outputs);
+    wl_list_init(&state.toplevel_handles);
 
     parse_command_line(argc, argv, &state);
     set_watch_lists();
@@ -1148,8 +1443,8 @@ int main(int argc, char **argv) {
         if (wl_display_flush(state.display) == -1 && errno != EAGAIN)
             break;
 
-        // Wait for a mpv callback or wl_display event with 16ms timeout (60FPS)
-        if (poll(fds, sizeof(fds) / sizeof(fds[0]), 16) == -1 && errno != EINTR)
+        // Wait for a mpv callback or wl_display event within 10ms
+        if (poll(fds, sizeof(fds) / sizeof(fds[0]), 10) == -1 && errno != EINTR)
             break;
 
         // If wl_display_prepare_read() was successful as 0
