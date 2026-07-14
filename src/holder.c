@@ -142,33 +142,24 @@ static struct toplevel_handle_state *match_toplevel_handle(struct wl_state *wl_s
     struct toplevel_handle_state *handle_state;
     wl_list_for_each(handle_state, &wl_state->toplevel_handles, link) {
 
-        if(handle_state->handle == toplevel_handle) {
+        if(handle_state->handle == toplevel_handle)
             return handle_state;
-        }
     }
 
     return NULL;
 }
 
 static void toplevel_title(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
-        const char *title) {
-    // NOP
-}
+        const char *title) { /* NOP */ }
 
 static void toplevel_app_id(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
-        const char *app_id) {
-    // NOP
-}
+        const char *app_id) { /* NOP */ }
 
 static void toplevel_output_enter(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
-        struct wl_output *output) {
-    // NOP
-}
+        struct wl_output *output) { /* NOP */ }
 
 static void toplevel_output_leave(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
-        struct wl_output *output) {
-    // NOP
-}
+        struct wl_output *output) { /* NOP */ }
 
 static void check_handle_blocking(struct toplevel_handle_state *handle_state, struct wl_state *wl_state,
         bool currently_blocking) {
@@ -215,9 +206,7 @@ static void toplevel_state(void *data, struct zwlr_foreign_toplevel_handle_v1 *t
 }
 
 
-static void toplevel_done(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
-    // NOP
-}
+static void toplevel_done(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) { /* NOP */ }
 
 static void toplevel_closed(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
 
@@ -226,17 +215,14 @@ static void toplevel_closed(void *data, struct zwlr_foreign_toplevel_handle_v1 *
     struct toplevel_handle_state *handle_state = match_toplevel_handle(wl_state, toplevel_handle);
     if (!handle_state) return;
 
-    if(handle_state->is_blocking) {
+    if(handle_state->is_blocking)
         check_handle_blocking(handle_state, wl_state, false);
-    }
 
     wl_list_remove(&handle_state->link);
 }
 
 static void toplevel_parent(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
-        struct zwlr_foreign_toplevel_handle_v1 *parent) {
-    // NOP
-}
+        struct zwlr_foreign_toplevel_handle_v1 *parent) { /* NOP */ }
 
 static const struct zwlr_foreign_toplevel_handle_v1_listener toplevel_handle_listener = {
     .title = toplevel_title,
@@ -263,9 +249,7 @@ static void toplevel_created(void *data, struct zwlr_foreign_toplevel_manager_v1
     zwlr_foreign_toplevel_handle_v1_add_listener(handle_state->handle, &toplevel_handle_listener, state);
 }
 
-static void toplevel_finished(void *data, struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager) {
-    // NOP
-}
+static void toplevel_finished(void *data, struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager) { /* NOP */ }
 
 static const struct zwlr_foreign_toplevel_manager_v1_listener toplevel_manager_listener = {
     .toplevel = toplevel_created,
@@ -273,8 +257,8 @@ static const struct zwlr_foreign_toplevel_manager_v1_listener toplevel_manager_l
 };
 
 static void destroy_display_output(struct display_output *output) {
-    if (!output)
-        return;
+    if (!output) return;
+
     wl_list_remove(&output->link);
     if (output->layer_surface != NULL)
         zwlr_layer_surface_v1_destroy(output->layer_surface);
@@ -335,14 +319,10 @@ static void create_layer_surface(struct display_output *output) {
 }
 
 static void output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width,
-        int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) {
-    // NOP
-}
+        int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) { /* NOP */ }
 
 static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height,
-        int32_t refresh) {
-    // NOP
-}
+        int32_t refresh) { /* NOP */ }
 
 static void output_done(void *data, struct wl_output *wl_output) {
     (void)wl_output;
@@ -363,9 +343,7 @@ static void output_done(void *data, struct wl_output *wl_output) {
     init_dummy_buffer(output);
 }
 
-static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
-    // NOP
-}
+static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) { /* NOP */ }
 
 static void output_name(void *data, struct wl_output *wl_output, const char *name) {
     (void)wl_output;
@@ -453,7 +431,7 @@ static void copy_argv(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    for (int i=0; i < argc; i++) {
+    for (uint i=0; i < argc; i++) {
         halt_info.argv_copy[i] = strdup(argv[i]);
     }
 }
@@ -573,9 +551,7 @@ int main(int argc, char **argv) {
     if (wl_list_empty(&state.outputs))
         return EXIT_FAILURE;
 
-    while (wl_display_dispatch(state.display) != -1) {
-        // NOP
-    }
+    while (wl_display_dispatch(state.display) != -1) { /* NOP */ }
 
     struct display_output *output, *tmp_output;
     wl_list_for_each_safe(output, tmp_output, &state.outputs, link) { destroy_display_output(output); }

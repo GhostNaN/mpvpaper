@@ -180,6 +180,7 @@ static void render(struct display_output *output) {
     if (mpv_err < 0)
         cflp_error("Failed to render frame with mpv, %s", mpv_error_string(mpv_err));
 
+    // Callback new frame
     output->frame_callback = wl_surface_frame(output->surface);
     wl_callback_add_listener(output->frame_callback, &wl_surface_frame_listener, output);
     output->redraw_needed = false;
@@ -507,7 +508,7 @@ static void set_init_mpv_options(const struct wl_state *state) {
     }
 }
 
-/// Sync fence tracking wrapper to resolve libmpv memory/descriptor leaks by returning NULL
+// Sync fence tracking wrapper to resolve libmpv memory/descriptor leaks by returning NULL
 static GLsync APIENTRY wrap_glFenceSync(GLenum condition, GLbitfield flags) {
     (void)condition;
     (void)flags;
@@ -525,7 +526,10 @@ static void *get_proc_address_mpv(void *ctx, const char *name) {
 static void render_update_callback(void *callback_ctx) {
     (void)callback_ctx;
     uint64_t inc = 1;
-    (void)write(wakeup_fd, &inc, sizeof(inc));
+    if (write(wakeup_fd, &inc, sizeof(inc)) < 0) {
+        cflp_error("Failed to write to wakeup eventfd");
+        exit_mpvpaper(EXIT_FAILURE);
+    }
 }
 
 static void init_mpv(const struct wl_state *state) {
@@ -694,9 +698,8 @@ static struct toplevel_handle_state *match_toplevel_handle(struct wl_state *wl_s
     struct toplevel_handle_state *handle_state;
     wl_list_for_each(handle_state, &wl_state->toplevel_handles, link) {
 
-        if(handle_state->handle == toplevel_handle) {
+        if(handle_state->handle == toplevel_handle)
             return handle_state;
-        }
     }
 
     return NULL;
@@ -716,19 +719,13 @@ static void toplevel_title(void *data, struct zwlr_foreign_toplevel_handle_v1 *t
 }
 
 static void toplevel_app_id(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
-        const char *app_id) {
-    // NOP
-}
+        const char *app_id) { /* NOP */ }
 
 static void toplevel_output_enter(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
-        struct wl_output *output) {
-    // NOP
-}
+        struct wl_output *output) { /* NOP */ }
 
 static void toplevel_output_leave(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
-        struct wl_output *output) {
-    // NOP
-}
+        struct wl_output *output) { /* NOP */ }
 
 static void check_handle_blocking(struct toplevel_handle_state *handle_state, struct wl_state *wl_state,
         bool currently_blocking) {
@@ -753,10 +750,9 @@ static void check_handle_blocking(struct toplevel_handle_state *handle_state, st
 
                 stop_mpvpaper();
             }
-
-            if (!halt_info.full_paused && !halt_info.mpv_paused) {
+            if (!halt_info.full_paused && !halt_info.mpv_paused)
                 update_mpv_pause_state(&halt_info.full_paused, true, iter_handle->title);
-            }
+
         } else { // No windows are blocking anymore
             update_mpv_pause_state(&halt_info.full_paused, false, "Blocking Windows");
         }
@@ -788,10 +784,7 @@ static void toplevel_state(void *data, struct zwlr_foreign_toplevel_handle_v1 *t
     check_handle_blocking(handle_state, wl_state, currently_blocking);
 }
 
-
-static void toplevel_done(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
-    // NOP
-}
+static void toplevel_done(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) { /* NOP */ }
 
 static void toplevel_closed(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
 
@@ -800,9 +793,8 @@ static void toplevel_closed(void *data, struct zwlr_foreign_toplevel_handle_v1 *
     struct toplevel_handle_state *handle_state = match_toplevel_handle(wl_state, toplevel_handle);
     if (!handle_state) return;
 
-    if(handle_state->is_blocking) {
+    if(handle_state->is_blocking)
         check_handle_blocking(handle_state, wl_state, false);
-    }
 
     // Destroy handle
     if (handle_state->title) free(handle_state->title);
@@ -810,9 +802,7 @@ static void toplevel_closed(void *data, struct zwlr_foreign_toplevel_handle_v1 *
 }
 
 static void toplevel_parent(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
-        struct zwlr_foreign_toplevel_handle_v1 *parent) {
-    // NOP
-}
+        struct zwlr_foreign_toplevel_handle_v1 *parent) { /* NOP */ }
 
 static const struct zwlr_foreign_toplevel_handle_v1_listener toplevel_handle_listener = {
     .title = toplevel_title,
@@ -824,7 +814,6 @@ static const struct zwlr_foreign_toplevel_handle_v1_listener toplevel_handle_lis
     .closed = toplevel_closed,
     .parent = toplevel_parent,
 };
-
 
 static void toplevel_created(void *data, struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager,
         struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle) {
@@ -839,9 +828,7 @@ static void toplevel_created(void *data, struct zwlr_foreign_toplevel_manager_v1
     zwlr_foreign_toplevel_handle_v1_add_listener(handle_state->handle, &toplevel_handle_listener, state);
 }
 
-static void toplevel_finished(void *data, struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager) {
-    // NOP
-}
+static void toplevel_finished(void *data, struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager) { /* NOP */ }
 
 static const struct zwlr_foreign_toplevel_manager_v1_listener toplevel_manager_listener = {
     .toplevel = toplevel_created,
@@ -849,8 +836,8 @@ static const struct zwlr_foreign_toplevel_manager_v1_listener toplevel_manager_l
 };
 
 static void destroy_display_output(struct display_output *output) {
-    if (!output)
-        return;
+    if (!output) return;
+
     wl_list_remove(&output->link);
     if (output->layer_surface != NULL)
         zwlr_layer_surface_v1_destroy(output->layer_surface);
@@ -942,14 +929,10 @@ static void create_layer_surface(struct display_output *output) {
 }
 
 static void output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width,
-        int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) {
-    // NOP
-}
+        int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) { /* NOP */ }
 
 static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height,
-        int32_t refresh) {
-    // NOP
-}
+        int32_t refresh) { /* NOP */ }
 
 static void output_done(void *data, struct wl_output *wl_output) {
     (void)wl_output;
@@ -994,6 +977,8 @@ static void output_done(void *data, struct wl_output *wl_output) {
 }
 
 static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
+    (void)wl_output;
+
     struct display_output *output = data;
     output->scale = scale;
 }
@@ -1121,7 +1106,7 @@ static void copy_argv(int argc, char *argv[]) {
     }
 
     int j = 0;
-    for (int i=0; i < argc; i++) {
+    for (uint i=0; i < argc; i++) {
         if (strcmp(argv[i], "-Z") == 0) { // Remove hidden opt
             i++; // Skip optind
             halt_info.argc -= 2;
@@ -1277,7 +1262,7 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
                 // Split options by newline handling quotes and escaped characters
                 bool in_single_quotes = 0, in_double_quotes = 0, escape_next_char = 0;
                 int write_index = 0;
-                for (int i = 0; mpv_options[i] != '\0'; i++) {
+                for (uint i = 0; mpv_options[i] != '\0'; i++) {
                     if (escape_next_char) {
                         mpv_options[write_index++] = mpv_options[i];
                         escape_next_char = 0;
@@ -1371,7 +1356,7 @@ static void check_paper_processes() {
     const char *other_wallpapers[] = {"swaybg", "glpaper", "hyprpaper", "wpaperd", "swww-daemon"};
     char wallpaper_sbuffer[64] = {0};
 
-    for (int i=0; i < sizeof(other_wallpapers) / sizeof(other_wallpapers[0]); i++) {
+    for (uint i=0; i < sizeof(other_wallpapers) / sizeof(other_wallpapers[0]); i++) {
         snprintf(wallpaper_sbuffer, sizeof(wallpaper_sbuffer), "pidof %s > /dev/null", other_wallpapers[i]);
 
         if (!system(wallpaper_sbuffer))
@@ -1457,8 +1442,8 @@ int main(int argc, char **argv) {
         if (wl_display_flush(state.display) == -1 && errno != EAGAIN)
             break;
 
-        // Wait for a mpv callback or wl_display event with 16ms timeout (60FPS)
-        if (poll(fds, sizeof(fds) / sizeof(fds[0]), 16) == -1 && errno != EINTR)
+        // Wait for a mpv callback or wl_display event within 10ms
+        if (poll(fds, sizeof(fds) / sizeof(fds[0]), 10) == -1 && errno != EINTR)
             break;
 
         // If wl_display_prepare_read() was successful as 0
