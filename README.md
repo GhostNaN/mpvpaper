@@ -48,7 +48,10 @@ echo 'cycle pause' | socat - /tmp/mpv-socket
 ```
 For more mpv commands read: https://mpv.io/manual/master/#command-interface
 
-For more info on mpvpaper, please refer the the [man page](/mpvpaper.man).
+You can also take a look at [scripts](/scripts) page for ideas or refrences.
+
+#### For more info on mpvpaper, please refer the the [man page](/mpvpaper.man).
+
 ## Acknowledgments
 - glpaper and swaybg for the initial boilerplate code, check em out here:
   - https://hg.sr.ht/~scoopta/glpaper
