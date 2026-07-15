@@ -8,5 +8,3 @@ Use them at your own discretion.
 If you would like to improve these scripts or add new ones, please create a pull request to help contribute.
 
 **Note:** Please do not open issues regarding these scripts if they do not work as intended on your specific system.
-
-###  Absolutely NO warranty is provided for these scripts.
