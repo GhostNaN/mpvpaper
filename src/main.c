@@ -98,7 +98,7 @@ static struct {
 
 } halt_info = {NULL, NULL, 0, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-static pthread_t threads[5] = {0};
+static pthread_t threads[6] = {0};
 static pthread_mutex_t halt_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
@@ -114,7 +114,7 @@ static void exit_cleanup() {
         usleep(10000);
     }
     // If render loop failed to stop it's self
-    if (halt_info.stop_render_loop && VERBOSE)
+    if (halt_info.stop_render_loop && VERBOSE && pthread_self() != threads[0])
         cflp_warning("Failed to quit mpv");
 
     // Cancel all threads
@@ -130,6 +130,8 @@ static void exit_cleanup() {
 
     if (egl_context)
         eglDestroyContext(egl_display, egl_context);
+    if (egl_display)
+        eglTerminate(egl_display);
 
     if (wakeup_fd >= 0)
         close(wakeup_fd);
@@ -448,7 +450,7 @@ static void *handle_mpv_events(void *_) {
 }
 
 static void init_threads() {
-    uint id = 0;
+    uint id = 1;
 
     pthread_create(&threads[id], NULL, handle_mpv_events, NULL);
     id++;
@@ -1382,6 +1384,8 @@ int main(int argc, char **argv) {
     set_watch_lists();
     if (halt_info.auto_stop || halt_info.stoplist)
         copy_argv(argc, argv);
+
+    threads[0] = pthread_self(); // Assign main thread
 
     // Create eventfd for checking render_update_callback()
     wakeup_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE);
