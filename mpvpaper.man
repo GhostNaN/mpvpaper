@@ -1,4 +1,4 @@
-.TH MPVPAPER 1 "May 2025" "mpvpaper 1.8" "User Manual"
+.TH MPVPAPER 1 "July 2026" "mpvpaper 1.9" "User Manual"
 .SH NAME
 mpvpaper \- video wallpaper player using mpv for wlroots
 .SH SYNOPSIS
@@ -15,7 +15,7 @@ That allows you to play videos with \fBmpv\fR as your wallpaper.
 Displays usage options
 .TP
 \fB\-d\fR, \fB\-\-help-output\fR
-Displays all available outputs and quits
+Displays all available <output> and quits
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Be more verbose  (-vv for higher verbosity)
@@ -23,71 +23,81 @@ Be more verbose  (-vv for higher verbosity)
 \fB\-f\fR, \fB\-\-fork\fR
 Forks mpvpaper so you can close the terminal
 .TP
-\fB\-p\fR, \fB\-\-auto-pause\fR
-Automagically pause mpv when the wallpaper is hidden*
+\fB\-p\fR, \fB\-\-auto-pause\fR <FULL|MAX>
+Automagically* pause mpv when the wallpaper is hidden
 
-This saves CPU usage, more or less, seamlessly
+Reduces CPU usage seamlessly by pausing mpvpaper
 .TP
 \fB\-s\fR, \fB\-\-auto-stop\fR
-Automagically stop mpv when the wallpaper is hidden*
+Automagically* stop mpv when the wallpaper is hidden
 
-This saves CPU/RAM usage, although more abruptly
+Reduces CPU/RAM usage more abruptly by running a holder program
+.TP
+\fB\-a\fR, \fB\-\-auto-mode\fR
+Extend auto-pause/stop to trigger when any window is
+
+<FULL> (fullscreen) or <MAX> (fullscreen/maximized)
 .TP
 \fB\-n\fR, \fB\-\-slideshow\fR <seconds>
 Slideshow mode plays the next video in a playlist every \fI\<seconds>\fR
 
-And passes mpv options "loop loop-playlist" for convenience
+And passes \fBmpv\fR(1) options "loop loop-playlist" for convenience
 .TP
 \fB\-l\fR, \fB\-\-layer\fR <layer>
-Specifies shell surface \fI\<layer>\fR to run on (background by default)
+Specifies shell surface \fI\<layer>\fR to run on (default: background)
 .TP
 \fB\-o\fR, \fB\-\-mpv-options\fR <"options">
-Forwards mpv \fI\<"options">\fR
+Forwards \fBmpv\fR(1) \fI\<"options">\fR
 
-Must be within quotes if multiple options are passed
+Must be enclosed in quotes "" if multiple options are passed
 
 .SH EXAMPLES
 Simple example:
 .RS
-mpvpaper DP-2 /path/to/video
+$ mpvpaper DP-2 /path/to/video
 .RE
 
 You can select the output with either a connection or identifier names:
 .RS
-mpvpaper 'DP-2 DP-1 HDMI-A-1' /path/to/video
+$ mpvpaper 'DP-2 DP-1 HDMI-A-1' /path/to/video
 .RE
 .RS
-mpvpaper 'Acer Technologies Acer H236HL LX1AA12341234' /path/to/video
+$ mpvpaper 'Acer Technologies Acer H236HL LX1AA12341234' /path/to/video
 .RE
 
 To play the same video on all outputs:
 .RS
-mpvpaper ALL /path/to/video
+$ mpvpaper ALL /path/to/video
 .RE
 
-Forward mpv options by passing "--mpv-options" or "-o" like so:
+Save resources like CPU/RAM usage with --auto-stop and --auto-mode:
 .RS
-mpvpaper -o "no-audio --loop-playlist shuffle" HDMI-A-1 www.url/to/playlist
+$ mpvpaper --auto-stop --auto-mode FULL DP-1 /path/to/video
+.RE
+
+Forward \fBmpv\fR(1) options by passing --mpv-options or -o like so:
+.RS
+$ mpvpaper -o "no-audio --loop-playlist shuffle" HDMI-A-1 www.url/to/playlist
 .RE
 
 You can also control mpvpaper just like \fBmpv\fR in the terminal with keyboard bindings.
-But if you would like to control mpvpaper while it\'s forked, you could use a mpv input-ipc-server like this:
+But if you would like to control mpvpaper while it\'s forked, you could use a \fBmpv\fR(1) input-ipc-server like this:
 .RS
-mpvpaper -o "input-ipc-server=/tmp/mpv-socket-DP-1" DP-1 /path/to/video
+$ mpvpaper -o "input-ipc-server=/tmp/mpv-socket-DP-1" DP-1 /path/to/video
 .RE
 
-Then input commands with \fBsocat\fR. For example, toggle pause:
+Then input commands with \fBsocat\fR(1). For example, toggle pause:
 .RS
-echo 'cycle pause' | socat - /tmp/mpv-socket-DP-1
+$ echo 'cycle pause' | socat - /tmp/mpv-socket-DP-1
 .RE
 
-For more mpv commands read:
-.UR https://mpv.io/manual/master/#command-interface
+For more \fBmpv\fR(1) commands read:
+.UR <https://mpv.io/manual/master/#command-interface>
 .UE
 
 .SH FILES
 
-These files(watch lists) contain lists of program names that, if found running with \fBpidof\fR, 
+The following files, also know as "watch lists", contain lists of program names that, if found running with \fBpidof\fR(1),
 will cause mpvpaper to pause/stop and must be created manually**
 
 .RS
@@ -101,7 +111,7 @@ List of program names that will cause mpvpaper to pause
 List of program names that will cause mpvpaper to stop
 .RE .RE
 
-Add programs that can be found with the \fBpidof\fR command into the list and separate by spaces or newlines.
+Add programs that can be found with the \fBpidof\fR(1) command into the list and separate by spaces or newlines.
 .br .br
 For example: "firefox steam obs" or:
 .RS
@@ -118,7 +128,7 @@ For example: "firefox steam obs" or:
 mpvpaper manipulates a feature of Wayland called a "surface frame callback"
 .P
 This feature of Wayland allows mpvpaper to draw/render only when it makes sense to do so.
-And one reason mpvpaper might not draw/render is if it\'s "hidden".
+And one reason mpvpaper might not draw/render is if it's "hidden".
 This is the magic behind the automagic pause/stop options.
 .P
 Whatever "hidden" means is up to compositor. As for Sway, "hidden" is if there is a fullscreen window
@@ -127,7 +137,11 @@ blocking the wallpaper view entirely.
 .P
 This feature is at best a hack that works on some compositors.
 Usability of these auto options will vary and may not work as intended or at all.
-In such a case, other features like the "watch lists" mentioned above should be used instead.
+That's why it's heavily recommended to also use the --auto-mode option to extend
+the usability of the auto options to check for fullscreen/maximized windows.
+.P
+If none of the auto options work due to compositor support or odd quirks,
+other features like the "watch lists" mentioned above should be used instead.
 
 .RE
 
@@ -144,12 +158,12 @@ in the watch lists are no longer running
 Extra notes:
 .RS
 \(bu When mpvpaper is resuming after "stopping", mpvpaper should begin where it left off.
-Both in terms of time position and playlist position(if not shuffled)
+Both in terms of time position and playlist position (if not shuffled)
     
-\(bu There is a small time delay(1-2 secs.) with the automagic options
+\(bu There is a small time delay (1-2 secs.) with the automagic options
 as it uses time to calculate when to act
     
-\(bu mpv user configs are loaded by default
+\(bu mpv user configs are loaded by default, override with --mpv-options
 
 .RE
 
@@ -162,9 +176,9 @@ Created by GhostNaN
 .SM Inspired by scoopta\'s \fBglpaper\fR
 
 Code Repository:
-.UR https://github.com/GhostNaN/mpvpaper/ 
+.UR <https://github.com/GhostNaN/mpvpaper/>
 .UE
 
 .SH SEE ALSO
-
-mpv (1)
+.PP
+\fBmpv\fR(1)
