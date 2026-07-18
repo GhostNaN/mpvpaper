@@ -799,8 +799,9 @@ static void toplevel_closed(void *data, struct zwlr_foreign_toplevel_handle_v1 *
         check_handle_blocking(handle_state, wl_state, false);
 
     // Destroy handle
-    if (handle_state->title) free(handle_state->title);
     wl_list_remove(&handle_state->link);
+    free(handle_state->title);
+    free(handle_state);
 }
 
 static void toplevel_parent(void *data, struct zwlr_foreign_toplevel_handle_v1 *toplevel_handle,
