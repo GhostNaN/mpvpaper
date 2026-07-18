@@ -842,14 +842,16 @@ static void destroy_display_output(struct display_output *output) {
     if (!output) return;
 
     wl_list_remove(&output->link);
-    if (output->layer_surface != NULL)
-        zwlr_layer_surface_v1_destroy(output->layer_surface);
-    if (output->surface != NULL)
-        wl_surface_destroy(output->surface);
     if (output->egl_surface)
         eglDestroySurface(egl_display, output->egl_surface);
     if (output->egl_window)
         wl_egl_window_destroy(output->egl_window);
+    if (output->layer_surface != NULL)
+        zwlr_layer_surface_v1_destroy(output->layer_surface);
+    if (output->surface != NULL)
+        wl_surface_destroy(output->surface);
+    if (output->frame_callback)
+        wl_callback_destroy(output->frame_callback);
     wl_output_destroy(output->wl_output);
 
     free(output->name);
@@ -1482,8 +1484,8 @@ int main(int argc, char **argv) {
             mpv_render_context_update(mpv_glcontext);
 
             // Draw frame for all outputs
-            struct display_output *output;
-            wl_list_for_each(output, &state.outputs, link) {
+            struct display_output *output, *tmp_output;
+            wl_list_for_each_safe(output, tmp_output, &state.outputs, link) {
                 // Redraw immediately if not waiting for frame callback
                 if (output->frame_callback == NULL) {
                     // Avoid crash when output is destroyed

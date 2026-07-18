@@ -268,6 +268,7 @@ static void destroy_display_output(struct display_output *output) {
     wl_output_destroy(output->wl_output);
 
     free(output->name);
+    free(output->identifier);
     free(output);
 }
 
