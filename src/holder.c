@@ -279,6 +279,8 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     output->height = height;
     zwlr_layer_surface_v1_ack_configure(surface, serial);
 
+    if (width == 0 || height == 0) return;
+
     if (halt_info.stoplist)
         check_stoplist();
     if (halt_info.auto_stop)
@@ -330,18 +332,32 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
     struct display_output *output = data;
 
-    bool name_ok = (strstr(output->state->monitor, output->name) != NULL) ||
-            (strstr(output->state->monitor, output->identifier) != NULL) ||
-            (strcmp(output->state->monitor, "*") == 0) ||
-            (strcmp(output->state->monitor, "ALL") == 0) ||
-            (strcmp(output->state->monitor, "All") == 0) ||
-            (strcmp(output->state->monitor, "all") == 0);
-    if (name_ok && !output->layer_surface)
-        create_layer_surface(output);
-    if (!name_ok)
-        destroy_display_output(output);
+    char *monitor_copy = strdup(output->state->monitor);
+    bool name_ok = false;
 
-    init_dummy_buffer(output);
+    for (char *tok = strtok(monitor_copy, " \t"); tok; tok = strtok(NULL, " \t")) {
+        if (strcmp(tok, output->name) == 0) {
+            name_ok = true;
+            break;
+        }
+    }
+    free(monitor_copy);
+
+    if (output->identifier)
+        name_ok = name_ok || (output->identifier[0] && strstr(output->state->monitor, output->identifier) != NULL);
+
+    name_ok = name_ok ||
+        strcmp(output->state->monitor, "*") == 0 ||
+        strcasecmp(output->state->monitor, "all") == 0;
+
+
+    if (name_ok && !output->layer_surface) {
+        create_layer_surface(output);
+        init_dummy_buffer(output);
+    }
+
+    if (!name_ok || (strcmp(output->state->monitor, "") == 0))
+        destroy_display_output(output);
 }
 
 static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) { /* NOP */ }
@@ -492,8 +508,10 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
         "It's sole purpose is to check if there is:\n"
         "Any program that is running from the stoplist file\n"
         "- Set in \"~/.config/mpvpaper/stoplist\"\n"
-        "And if the wallpaper needs to be seen when drawn\n"
-        "- Set with \"-s\" or \"--auto-stop\" mpvpaper option\n";
+        "If the wallpaper needs to be seen when drawn\n"
+        "- Set with \"-s\" or \"--auto-stop\" mpvpaper option\n"
+        "As well as check for fullscreen/maximized windows\n"
+        "- Set with \"-a\" or \"--auto-mode\" mpvpaper option\n";
 
 
     int auto_mode = 0;
