@@ -67,8 +67,8 @@ struct toplevel_handle_state {
 };
 
 static EGLConfig egl_config;
-static EGLDisplay *egl_display;
-static EGLContext *egl_context;
+static EGLDisplay egl_display;
+static EGLContext egl_context;
 
 static mpv_handle *mpv;
 static mpv_render_context *mpv_glcontext;
