@@ -188,8 +188,11 @@ static void render(struct display_output *output) {
     output->redraw_needed = false;
 
     // Display frame
-    if (!eglSwapBuffers(egl_display, output->egl_surface))
+    if (!eglSwapBuffers(egl_display, output->egl_surface)) {
         cflp_error("Failed to swap egl buffers %s", eglGetErrorString(eglGetError()));
+        wl_callback_destroy(output->frame_callback);
+        output->frame_callback = NULL;
+    }
     else {
         // Inform libmpv that the buffer has been presented so it can release any
         // associated GL fence objects and resources
@@ -850,8 +853,12 @@ static void destroy_display_output(struct display_output *output) {
     if (!output) return;
 
     wl_list_remove(&output->link);
-    if (output->egl_surface)
+    if (output->egl_surface) {
+        if (eglGetCurrentSurface(EGL_DRAW) == output->egl_surface ||
+            eglGetCurrentSurface(EGL_READ) == output->egl_surface)
+            eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_context);
         eglDestroySurface(egl_display, output->egl_surface);
+    }
     if (output->egl_window)
         wl_egl_window_destroy(output->egl_window);
     if (output->layer_surface != NULL)
