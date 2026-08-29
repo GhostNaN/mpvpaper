@@ -23,7 +23,7 @@ Be more verbose  (-vv for higher verbosity)
 \fB\-f\fR, \fB\-\-fork\fR
 Forks mpvpaper so you can close the terminal
 .TP
-\fB\-p\fR, \fB\-\-auto-pause\fR <FULL|MAX>
+\fB\-p\fR, \fB\-\-auto-pause\fR
 Automagically* pause mpv when the wallpaper is hidden
 
 Reduces CPU usage seamlessly by pausing mpvpaper
@@ -33,10 +33,10 @@ Automagically* stop mpv when the wallpaper is hidden
 
 Reduces CPU/RAM usage more abruptly by running a holder program
 .TP
-\fB\-a\fR, \fB\-\-auto-mode\fR
+\fB\-a\fR, \fB\-\-auto-mode\fR <mode>
 Extend auto-pause/stop to trigger when any window is
 
-<FULL> (fullscreen) or <MAX> (fullscreen/maximized)
+<FULL>(fullscreen) | <MAX>(fullscreen/maximized) | <ACTIVE>(currently active)
 .TP
 \fB\-n\fR, \fB\-\-slideshow\fR <seconds>
 Slideshow mode plays the next video in a playlist every \fI\<seconds>\fR
@@ -97,7 +97,7 @@ For more \fBmpv\fR(1) commands read:
 
 .SH FILES
 
-The following files, also know as "watch lists", contain lists of program names that, if found running with \fBpidof\fR(1),
+The following files, also known as "watch lists", contain lists of program names that, if found running with \fBpidof\fR(1),
 will cause mpvpaper to pause/stop and must be created manually**
 
 .RS
