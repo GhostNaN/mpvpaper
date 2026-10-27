@@ -1,5 +1,6 @@
 #include <fcntl.h>
 #include <getopt.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +8,7 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#include "process_check.h"
 
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
@@ -70,14 +72,13 @@ static void revive_mpvpaper() {
 }
 
 static void check_stoplist() {
-
-    char pid_name[512] = {0};
-
     for (uint i=0; halt_info.stoplist[i] != NULL; i++) {
-        snprintf(pid_name, sizeof(pid_name), "pidof %s > /dev/null", halt_info.stoplist[i]);
-
-        while (!system(pid_name))
+        int running;
+        while ((running = process_is_running(halt_info.stoplist[i])) == 1)
             usleep(100000); // 0.1 sec
+        if (running < 0)
+            fprintf(stderr, "Failed to check process %s: %s\n",
+                    halt_info.stoplist[i], strerror(errno));
     }
     if (!halt_info.auto_stop)
         revive_mpvpaper();

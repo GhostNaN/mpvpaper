@@ -24,6 +24,7 @@
 #include <mpv/render_gl.h>
 
 #include <cflogprinter.h>
+#include "process_check.h"
 
 typedef unsigned int uint;
 
@@ -313,15 +314,12 @@ static void update_mpv_pause_state(bool *pause_flag, bool new_flag_state, const 
 }
 
 static char *check_watch_list(char **list) {
-
-    char pid_name[512] = {0};
-
     for (uint i=0; list[i] != NULL; i++) {
-        snprintf(pid_name, sizeof(pid_name), "pidof %s > /dev/null", list[i]);
-
-        // Stop if program is open
-        if (!system(pid_name))
+        int running = process_is_running(list[i]);
+        if (running == 1)
             return list[i];
+        if (running < 0 && VERBOSE)
+            cflp_warning("Failed to check process %s: %s", list[i], strerror(errno));
     }
     return NULL;
 }
@@ -1378,13 +1376,13 @@ static void parse_command_line(int argc, char **argv, struct wl_state *state) {
 static void check_paper_processes() {
     // Check for other wallpaper process running
     const char *other_wallpapers[] = {"swaybg", "glpaper", "hyprpaper", "wpaperd", "swww-daemon"};
-    char wallpaper_sbuffer[64] = {0};
 
     for (uint i=0; i < sizeof(other_wallpapers) / sizeof(other_wallpapers[0]); i++) {
-        snprintf(wallpaper_sbuffer, sizeof(wallpaper_sbuffer), "pidof %s > /dev/null", other_wallpapers[i]);
-
-        if (!system(wallpaper_sbuffer))
+        int running = process_is_running(other_wallpapers[i]);
+        if (running == 1)
             cflp_warning("%s is running. This may block mpvpaper from being seen.", other_wallpapers[i]);
+        else if (running < 0 && VERBOSE)
+            cflp_warning("Failed to check process %s: %s", other_wallpapers[i], strerror(errno));
     }
 }
 
